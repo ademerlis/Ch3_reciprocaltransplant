@@ -1,0 +1,22 @@
+---
+title: "survivorship"
+author: "allyson_demerlis"
+date: "2023-04-17"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+survivorship <- read.csv("survivorship_data_04042023.csv")
+```
+
+
+```{r}
+survivorship %>% 
+  pivot_longer(T0_mortality:T2_mortality, names_to = "TimePoint", values_to = "Binary_deadoralive") %>% 
+  mutate(Binary_deadoralive = as.factor(Binary_deadoralive)) %>% 
+  group_by(Genet, Transplant, TimePoint, Binary_deadoralive) %>% 
+  summarize(count = n()) %>% 
+  ggplot(., aes(x=TimePoint,fill = Binary_deadoralive)) + geom_bar() + facet_wrap(~Transplant)
+```
+
