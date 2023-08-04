@@ -7,16 +7,23 @@ output: html_document
 
 ```{r}
 library(tidyverse)
-survivorship <- read.csv("survivorship_data_04042023.csv")
+survivorship <- read.csv("survivorship_data_07112023.csv")
 ```
 
 
 ```{r}
 survivorship %>% 
-  pivot_longer(T0_mortality:T2_mortality, names_to = "TimePoint", values_to = "Binary_deadoralive") %>% 
+  pivot_longer(T0_mortality:T3_mortality, names_to = "TimePoint", values_to = "Binary_deadoralive") %>% 
   mutate(Binary_deadoralive = as.factor(Binary_deadoralive)) %>% 
-  group_by(Genet, Transplant, TimePoint, Binary_deadoralive) %>% 
+  mutate(mortality_status = case_when(
+    Binary_deadoralive == "0" ~ "Dead",
+    Binary_deadoralive == "1" ~ "Alive")) %>% 
+  mutate(mortality_status = factor(mortality_status) %>% relevel(ref = "Dead")) %>% 
+  group_by(Genet, Transplant, TimePoint, mortality_status) %>% 
   summarize(count = n()) %>% 
-  ggplot(., aes(x=TimePoint,fill = Binary_deadoralive)) + geom_bar() + facet_wrap(~Transplant)
+  ggplot(., aes(x=TimePoint,fill = mortality_status)) + geom_bar() + facet_wrap(~Transplant) + theme_classic() +
+  labs(fill = "Mortality status") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_manual(values = c("#000000", "#666666"))
 ```
 
