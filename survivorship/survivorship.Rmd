@@ -7,6 +7,7 @@ output: html_document
 
 ```{r}
 library(tidyverse)
+library(survival)
 survivorship <- read.csv("survivorship_data_07112023.csv")
 ```
 
@@ -14,6 +15,15 @@ survivorship <- read.csv("survivorship_data_07112023.csv")
 ```{r}
 survivorship %>% 
   pivot_longer(T0_mortality:T3_mortality, names_to = "TimePoint", values_to = "Binary_deadoralive") %>% 
+  group_by(Genet, Transplant, TimePoint, Binary_deadoralive) %>% 
+  summarize(sum = n()) %>% 
+  mutate(Binary_deadoralive = as.factor(Binary_deadoralive)) %>% 
+  mutate(mortality_status = case_when(
+    Binary_deadoralive == "0" ~ "Dead",
+    Binary_deadoralive == "1" ~ "Alive")) %>% 
+  pivot_wider(names_from = mortality_status, values_from = sum)
+  
+
   mutate(Binary_deadoralive = as.factor(Binary_deadoralive)) %>% 
   mutate(mortality_status = case_when(
     Binary_deadoralive == "0" ~ "Dead",
@@ -25,5 +35,28 @@ survivorship %>%
   labs(fill = "Mortality status") +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
   scale_fill_manual(values = c("#000000", "#666666"))
+```
+
+```{r}
+survivorship %>% 
+  pivot_longer(T0_mortality:T3_mortality, names_to = "TimePoint", values_to = "Binary_deadoralive") %>% 
+  arrange(TimePoint) %>% 
+  group_by(Genet, Transplant) %>% 
+  survfit(Surv(TimePoint, Binary_deadoralive) ~ 1, data = .)
+  #need to make time points numeric --> dates
+  mutate(cumulative_survival = cumsum(1 - Binary_deadoralive)) %>% 
+  ggplot(., aes(x = TimePoint, y = cumulative_survival)) +
+  geom_step()
+
+# Fit Kaplan-Meier survival estimates
+fit <- survfit(Surv(time, status) ~ 1, data = df)
+
+# Convert survival estimates to a data frame
+survival_df <- data.frame(time = fit$time, survival_prob = 1 - fit$surv)
+
+# Create the Kaplan-Meier survival curve using ggplot
+ggplot(survival_df, aes(x = time, y = survival_prob)) +
+  geom_step() +
+  labs(x = "Time", y = "Survival Probability", title = "Kaplan-Meier Survival Curve")
 ```
 
