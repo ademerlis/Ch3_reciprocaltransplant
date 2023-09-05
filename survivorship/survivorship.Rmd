@@ -8,6 +8,8 @@ output: html_document
 ```{r}
 library(tidyverse)
 library(survival)
+library(ggpubr)
+library(survminer)
 survivorship <- read.csv("survivorship_data_07112023.csv")
 ```
 
@@ -15,48 +17,41 @@ survivorship <- read.csv("survivorship_data_07112023.csv")
 ```{r}
 survivorship %>% 
   pivot_longer(T0_mortality:T3_mortality, names_to = "TimePoint", values_to = "Binary_deadoralive") %>% 
-  group_by(Genet, Transplant, TimePoint, Binary_deadoralive) %>% 
-  summarize(sum = n()) %>% 
-  mutate(Binary_deadoralive = as.factor(Binary_deadoralive)) %>% 
-  mutate(mortality_status = case_when(
-    Binary_deadoralive == "0" ~ "Dead",
-    Binary_deadoralive == "1" ~ "Alive")) %>% 
-  pivot_wider(names_from = mortality_status, values_from = sum)
-  
+  mutate(Binary_deadoralive = as.factor(Binary_deadoralive)) %>% #change time point to days
+  mutate(time = case_when(TimePoint == "T0_mortality" ~ 0,
+                         TimePoint == "T1_mortality" ~ 51,
+                         TimePoint == "T2_mortality" ~ 119,
+                         TimePoint == "T3_mortality" ~ 217)) -> df 
 
-  mutate(Binary_deadoralive = as.factor(Binary_deadoralive)) %>% 
-  mutate(mortality_status = case_when(
-    Binary_deadoralive == "0" ~ "Dead",
-    Binary_deadoralive == "1" ~ "Alive")) %>% 
-  mutate(mortality_status = factor(mortality_status) %>% relevel(ref = "Dead")) %>% 
-  group_by(Genet, Transplant, TimePoint, mortality_status) %>% 
-  summarize(count = n()) %>% 
-  ggplot(., aes(x=TimePoint,fill = mortality_status)) + geom_bar() + facet_wrap(~Transplant) + theme_classic() +
-  labs(fill = "Mortality status") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  scale_fill_manual(values = c("#000000", "#666666"))
+# create survival object using the Kaplan-Meier method
+surv <- Surv(time = df$time, event = df$Binary_deadoralive)
+surv
+
+# run survival model for each species
+fit_reef <- survfit(surv ~ Transplant, data = df)
+summary(fit_reef)
+
+# Kaplan-Meier plots for each transplant
+fill.color<-c("#43a2ca", "#a97c50","#addd8e", "#006837")
+
+survival_species<-ggsurvplot(df, data = fit_reef, pval = TRUE, xlab="Days", ylab="Survival Probability",
+                                    conf.int = T, risk.table=T,palette=fill.color,
+                                    break.time.by=31, xlim=c(0,372), risk.table.y.text = FALSE) + ggtitle("Transplant") 
 ```
 
 ```{r}
 survivorship %>% 
   pivot_longer(T0_mortality:T3_mortality, names_to = "TimePoint", values_to = "Binary_deadoralive") %>% 
-  arrange(TimePoint) %>% 
-  group_by(Genet, Transplant) %>% 
-  survfit(Surv(TimePoint, Binary_deadoralive) ~ 1, data = .)
-  #need to make time points numeric --> dates
-  mutate(cumulative_survival = cumsum(1 - Binary_deadoralive)) %>% 
-  ggplot(., aes(x = TimePoint, y = cumulative_survival)) +
-  geom_step()
-
-# Fit Kaplan-Meier survival estimates
-fit <- survfit(Surv(time, status) ~ 1, data = df)
-
-# Convert survival estimates to a data frame
-survival_df <- data.frame(time = fit$time, survival_prob = 1 - fit$surv)
-
-# Create the Kaplan-Meier survival curve using ggplot
-ggplot(survival_df, aes(x = time, y = survival_prob)) +
-  geom_step() +
-  labs(x = "Time", y = "Survival Probability", title = "Kaplan-Meier Survival Curve")
+  mutate(Binary_deadoralive = as.factor(Binary_deadoralive)) %>% #change time point to days
+  mutate(time = case_when(TimePoint == "T0_mortality" ~ 0,
+                         TimePoint == "T1_mortality" ~ 51,
+                         TimePoint == "T2_mortality" ~ 119,
+                         TimePoint == "T3_mortality" ~ 217)) %>% 
+  group_by(Genet, Transplant, time, Binary_deadoralive) %>% 
+  summarise(count = n()) %>% 
+  ggplot(., aes(x=time, y=count, fill=Binary_deadoralive)) + geom_col() + facet_wrap(~Transplant) +
+  theme_classic() +
+  scale_fill_manual(values = c("#1c1b1b", "#628573")) +
+  labs(fill = "Mortality status", x = "Number of days", y = "Number of outplants")
 ```
 

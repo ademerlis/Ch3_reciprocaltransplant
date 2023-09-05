@@ -1,0 +1,391 @@
+---
+title: "environmental_data_plots"
+author: "allyson_demerlis"
+date: "2023-08-31"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(lubridate)
+```
+
+
+# EcoPAR
+
+## ecopar1959 raw txt data file
+```{r}
+#look at raw data file 
+ecopar1959_032823 <- read_tsv("environmental_data/nov22-mar23_rawdata/ecopar-sn5954-tag1959.raw.txt")
+
+ecopar1959_032823 %>% 
+  separate(col = `53651 records to read`, into = c("Date", "Time", "Value"), sep = "\t") %>% 
+  mutate(Date = mdy(Date), Time = hms(Time), Value = as.numeric(Value)) -> ecopar1959_032823
+
+length(unique(ecopar1959_032823$Date)) #115 days
+
+ecopar1959_032823 %>% 
+  filter(Date == "2022-12-31") #10 measurements were taken instantaneously at every 30 min interval for each day.
+
+ecopar1959_032823$datetime <- paste(ecopar1959_032823$Date, ecopar1959_032823$Time)
+ecopar1959_032823$datetime <- ymd_hms(ecopar1959_032823$datetime)
+  
+ecopar1959_032823 %>% #53,652 values
+  mutate(interval = floor_date(datetime, unit = "30 minutes")) %>% 
+  group_by(interval) %>% 
+  summarise(mean_value = mean(Value)) %>% #5,147 values
+  ggplot(., aes(x=interval, y=mean_value)) + geom_point()
+
+
+# look at Mike's data tidied excel file (it looks like he made a formula to convert PAR(raw) to PAR(calc). Formula is [Digital Im] * Power(10, PARraw - [Digital a0/Digitial a1])). Unsure what the digitial things are but it changes the PAR value by approximately 10^3 (6000 -> 6)
+
+#I found the equations from the SeaBird Scientific ECO Photosynthetically Active Radiation (PAR) sensor documentation: https://www.seabird.com/eco-photosynthetically-active-radiation-par-sensor/product-downloads?id=60762467733
+
+#Underwater PAR
+#Seasoft calculates light from an underwater Satlantic logarithmic analog PAR sensor as:
+# PAR = multiplier * Im * 10 (V –a0) / a1 [user-selected units]
+# where
+# V = voltage output
+# a0, a1, and lm are from the PAR calibration sheet that was provided by Satlantic
+# multiplier = 1.0 for units of μmol photons/ m2 sec (see Notes)
+
+#so the unit is micromol. convert to mol/day to be able to compare with Ian's paper
+```
+
+
+
+## ecopar1959 (Emerald) Dec-Mar Excel tidy data
+```{r}
+ecopar1959_032823_excel <-read_xlsx("Dec2022-Mar2023_rough-ecopar-sn5954-tag1959-emerald.xlsx", sheet = "sheet1")
+
+ecopar1959_032823_excel$`Datetime (UTC)` <- as.POSIXct(ecopar1959_032823_excel$`Datetime (UTC)`, tz = "UTC")
+ecopar1959_032823_excel$`Datetime (EST)` <- with_tz(ecopar1959_032823_excel$`Datetime (UTC)`, "America/New_York")
+
+ecopar1959_032823_excel %>% #53,621 values
+  select(`Datetime (EST)`, `PAR (calc)`) %>% 
+  mutate(interval = floor_date(`Datetime (EST)`, unit = "30 minutes")) %>% 
+  group_by(interval) %>% 
+  summarise(mean_value = mean(`PAR (calc)`)) %>% #5,369 values
+  ggplot(., aes(x=interval, y=mean_value)) + geom_point() #values look a lot different and cleaner. I'll use these for plotting
+
+# in Enochs et al. 2023, they "summed [PAR readings] between the hours of 10am and 3pm, to calculate a daily dose."
+
+ecopar1959_032823_excel %>% #53,621 values
+  select(`Datetime (EST)`, `PAR (calc)`) %>% 
+  group_by(as.Date(`Datetime (EST)`)) %>% 
+  mutate(hour = hour(`Datetime (EST)`), Date =as.Date(`Datetime (EST)`) ) %>% 
+  ungroup() %>% 
+  filter(hour >= 10 & hour <= 15) %>% 
+  select(`PAR (calc)`, hour, Date) %>% 
+  group_by(Date) %>% 
+  summarise(daily_dose = sum(`PAR (calc)`)) %>% 
+  ggplot(., aes(x= Date , y=daily_dose)) +
+  geom_point() +
+  geom_line() +
+  theme_classic() # these values look way higher than what Ian published as the daily dose, the range of his graph is 0-30 mol/day. I wonder if he took the mean value for the 10 instantaneous values taken at each 30 min? because adding those all together isn't an accurate representation.
+
+ecopar1959_032823_excel %>% #53,621 values
+  select(`Datetime (EST)`, `PAR (calc)`) %>% 
+  mutate(interval = floor_date(`Datetime (EST)`, unit = "30 minutes")) %>% 
+  group_by(interval) %>% 
+  summarise(mean_value = mean(`PAR (calc)`)) %>% #5,369 values
+  group_by(as.Date(interval)) %>% 
+  mutate(hour = hour(interval), Date =as.Date(interval) ) %>% 
+  ungroup() %>% 
+  filter(hour >= 10 & hour <= 15) %>% 
+  select(mean_value, hour, Date) %>% 
+  group_by(Date) %>% 
+  summarise(daily_dose = sum(mean_value)) %>% 
+  ggplot(., aes(x= Date , y=daily_dose)) +
+  geom_point() +
+  geom_line() +
+  theme_classic() #well that just reduced everything by an order of 10 but otherwise still way too high (~6000). That is because this is micromol. Divide by 1000 to get mol/day
+
+
+ecopar1959_032823_excel %>% #53,621 values
+  select(`Datetime (EST)`, `PAR (calc)`) %>% 
+  mutate(interval = floor_date(`Datetime (EST)`, unit = "30 minutes")) %>% 
+  group_by(interval) %>% 
+  summarise(mean_value = mean(`PAR (calc)`)) %>% #5,369 values
+  group_by(as.Date(interval)) %>% 
+  mutate(hour = hour(interval), Date =as.Date(interval) ) %>% 
+  ungroup() %>% 
+  filter(hour >= 10 & hour <= 15) %>% 
+  select(mean_value, hour, Date) %>% 
+  group_by(Date) %>% 
+  summarise(daily_dose = sum(mean_value)) %>% 
+  mutate(PAR_mol_day = daily_dose/1000) %>% 
+  ggplot(., aes(x= Date , y=PAR_mol_day)) +
+  geom_point() +
+  geom_line() +
+  theme_classic() +
+  labs(x="Day", y = "PAR (mol/day)")
+```
+
+## ecopar4298 (Emerald) Apr-Jul Excel tidy data
+```{r}
+ecopar4298_071123_excel <- read_xlsx("apr23-jul23_rawdata/ecopar-sn5954-tag4298_Emerald.xlsx", sheet = "ecopar-sn5954-tag4298.raw")
+
+ecopar4298_071123_excel$`Datetime (UTC)` <- as.POSIXct(ecopar4298_071123_excel$`Datetime (UTC)`, tz = "UTC")
+ecopar4298_071123_excel$`Datetime (EST)` <- with_tz(ecopar4298_071123_excel$`Datetime (UTC)`, "America/New_York")
+
+ecopar4298_071123_excel %>% #47,040 values
+  select(`Datetime (EST)`, `PAR (calc)`) %>% 
+  mutate(interval = floor_date(`Datetime (EST)`, unit = "30 minutes")) %>% 
+  group_by(interval) %>% 
+  summarise(mean_value = mean(`PAR (calc)`)) %>% #5,369 values
+  group_by(as.Date(interval)) %>% 
+  mutate(hour = hour(interval), Date =as.Date(interval) ) %>% 
+  ungroup() %>% 
+  filter(hour >= 10 & hour <= 15) %>% 
+  select(mean_value, hour, Date) %>% 
+  group_by(Date) %>% 
+  summarise(daily_dose = sum(mean_value)) %>% 
+  mutate(PAR_mol_day = daily_dose/1000) %>% 
+  ggplot(., aes(x= Date , y=PAR_mol_day)) +
+  geom_point() +
+  geom_line() +
+  theme_classic() +
+  labs(x="Day", y = "PAR (mol/day)")
+```
+
+
+## ecopar1960 (MacN) Dec-Mar Excel tidy data
+```{r}
+ecopar1960_032823_excel <-read_excel("Dec2022-Mar2023_rough-ecopar-sn5953-tag1960-macnorth.xlsx", sheet = "ecopar-sn5953-tag1960.raw")
+
+ecopar1960_032823_excel$`Datetime (UTC)` <- as.POSIXct(ecopar1960_032823_excel$`Datetime (UTC)`, tz = "UTC")
+ecopar1960_032823_excel$`Datetime (EST)` <- with_tz(ecopar1960_032823_excel$`Datetime (UTC)`, "America/New_York")
+
+ecopar1960_032823_excel %>% #47,040 values
+  select(`Datetime (EST)`, `PAR (calc)`) %>% 
+  mutate(interval = floor_date(`Datetime (EST)`, unit = "30 minutes")) %>% 
+  group_by(interval) %>% 
+  summarise(mean_value = mean(`PAR (calc)`)) %>% #5,369 values
+  group_by(as.Date(interval)) %>% 
+  mutate(hour = hour(interval), Date =as.Date(interval) ) %>% 
+  ungroup() %>% 
+  filter(hour >= 10 & hour <= 15) %>% 
+  select(mean_value, hour, Date) %>% 
+  group_by(Date) %>% 
+  summarise(daily_dose = sum(mean_value)) %>% 
+  mutate(PAR_mol_day = daily_dose/1000) %>% 
+  ggplot(., aes(x= Date , y=PAR_mol_day)) +
+  geom_point() +
+  geom_line() +
+  theme_classic() +
+  labs(x="Day", y = "PAR (mol/day)")
+```
+
+## ecopar4297 (MacN) Apr-Jul Excel tidy data
+```{r}
+ecopar4297_071123_excel <- read_excel("apr23-jul23_rawdata/ecopar-sn5953-tag4297_MacNorth.xlsx", sheet = "ecopar-sn5953-tag4297.raw")
+
+ecopar4297_071123_excel$`Datetime (UTC)` <- as.POSIXct(ecopar4297_071123_excel$`Datetime (UTC)`, tz = "UTC")
+ecopar4297_071123_excel$`Datetime (EST)` <- with_tz(ecopar4297_071123_excel$`Datetime (UTC)`, "America/New_York")
+
+ecopar4297_071123_excel %>% #47,040 values
+  select(`Datetime (EST)`, `PAR (calc)`) %>% 
+  mutate(interval = floor_date(`Datetime (EST)`, unit = "30 minutes")) %>% 
+  group_by(interval) %>% 
+  summarise(mean_value = mean(`PAR (calc)`)) %>% #5,369 values
+  group_by(as.Date(interval)) %>% 
+  mutate(hour = hour(interval), Date =as.Date(interval) ) %>% 
+  ungroup() %>% 
+  filter(hour >= 10 & hour <= 15) %>% 
+  select(mean_value, hour, Date) %>% 
+  group_by(Date) %>% 
+  summarise(daily_dose = sum(mean_value)) %>% 
+  mutate(PAR_mol_day = daily_dose/1000) %>% 
+  ggplot(., aes(x= Date , y=PAR_mol_day)) +
+  geom_point() +
+  geom_line() +
+  theme_classic() +
+  labs(x="Day", y = "PAR (mol/day)")
+```
+
+## combine all datasets into 1 so they can all be plotted together
+
+```{r}
+ecopar1959_032823_excel %>% #53,621 values
+  select(`Datetime (EST)`, `PAR (calc)`) %>% 
+  mutate(interval = floor_date(`Datetime (EST)`, unit = "30 minutes")) %>% 
+  group_by(interval) %>% 
+  summarise(mean_value = mean(`PAR (calc)`)) %>% #5,369 values
+  group_by(as.Date(interval)) %>% 
+  mutate(hour = hour(interval), Date =as.Date(interval) ) %>% 
+  ungroup() %>% 
+  filter(hour >= 10 & hour <= 15) %>% 
+  select(mean_value, hour, Date) %>% 
+  group_by(Date) %>% 
+  summarise(daily_dose = sum(mean_value)) %>% 
+  mutate(PAR_mol_day = daily_dose/1000) %>% 
+  mutate(reef = "Emerald") -> ecopar1959_032823
+
+ecopar4298_071123_excel %>% #47,040 values
+  select(`Datetime (EST)`, `PAR (calc)`) %>% 
+  mutate(interval = floor_date(`Datetime (EST)`, unit = "30 minutes")) %>% 
+  group_by(interval) %>% 
+  summarise(mean_value = mean(`PAR (calc)`)) %>% #5,369 values
+  group_by(as.Date(interval)) %>% 
+  mutate(hour = hour(interval), Date =as.Date(interval) ) %>% 
+  ungroup() %>% 
+  filter(hour >= 10 & hour <= 15) %>% 
+  select(mean_value, hour, Date) %>% 
+  group_by(Date) %>% 
+  summarise(daily_dose = sum(mean_value)) %>% 
+  mutate(PAR_mol_day = daily_dose/1000) %>% 
+  mutate(reef = "Emerald") -> ecopar4298_071123 
+
+ecopar1960_032823_excel %>% #47,040 values
+  select(`Datetime (EST)`, `PAR (calc)`) %>% 
+  mutate(interval = floor_date(`Datetime (EST)`, unit = "30 minutes")) %>% 
+  group_by(interval) %>% 
+  summarise(mean_value = mean(`PAR (calc)`)) %>% #5,369 values
+  group_by(as.Date(interval)) %>% 
+  mutate(hour = hour(interval), Date =as.Date(interval) ) %>% 
+  ungroup() %>% 
+  filter(hour >= 10 & hour <= 15) %>% 
+  select(mean_value, hour, Date) %>% 
+  group_by(Date) %>% 
+  summarise(daily_dose = sum(mean_value)) %>% 
+  mutate(PAR_mol_day = daily_dose/1000) %>% 
+  mutate(reef = "MacNorth") -> ecopar1960_032823
+
+ecopar4297_071123_excel %>% #47,040 values
+  select(`Datetime (EST)`, `PAR (calc)`) %>% 
+  mutate(interval = floor_date(`Datetime (EST)`, unit = "30 minutes")) %>% 
+  group_by(interval) %>% 
+  summarise(mean_value = mean(`PAR (calc)`)) %>% #5,369 values
+  group_by(as.Date(interval)) %>% 
+  mutate(hour = hour(interval), Date =as.Date(interval) ) %>% 
+  ungroup() %>% 
+  filter(hour >= 10 & hour <= 15) %>% 
+  select(mean_value, hour, Date) %>% 
+  group_by(Date) %>% 
+  summarise(daily_dose = sum(mean_value)) %>% 
+  mutate(PAR_mol_day = daily_dose/1000) %>% 
+  mutate(reef = "MacNorth") -> ecopar4297_071123
+
+full_join(ecopar1959_032823, ecopar4298_071123) %>% 
+  full_join(., ecopar1960_032823) %>% 
+  full_join(., ecopar4297_071123) -> all_ecopar_data_molperday
+
+all_ecopar_data_molperday %>% 
+  ggplot(., aes(x= Date , y=PAR_mol_day, color = reef)) +
+  geom_point() +
+  geom_line() +
+  theme_classic() +
+  labs(x="Day", y = "PAR (mol/day)") +
+  scale_color_manual(values = c("#edb9c3", "#5370c9"))
+```
+
+## Stats 
+
+```{r}
+all_ecopar_data_molperday
+
+#group dates by season
+#wet season = mid-may -- mid-october
+#dry season = mid-october -- mid-may
+
+all_ecopar_data_molperday %>% 
+  mutate(season = case_when(Date >= "2023-05-15" ~ "Wet",
+                            Date < "2023-05-15" ~ "Dry")) -> all_ecopar_data_molperday
+
+ecopar_lm <- lm(PAR_mol_day ~ reef*season, data = all_ecopar_data_molperday)
+
+summary(ecopar_lm)
+
+ecopar_anova<- aov(ecopar_lm)
+summary(ecopar_anova)
+
+qqnorm(ecopar_anova$residuals) #assume normality
+boxplot(resid(ecopar_anova)~all_ecopar_data_molperday$reef)
+boxplot(resid(ecopar_anova)~all_ecopar_data_molperday$season) #homogeneity of variance
+
+TukeyHSD(ecopar_anova)
+
+
+```
+
+
+
+# SeaFET
+
+
+
+# CTD
+
+## CTD6635 (Emerald) Dec-Mar Excel tidy data
+```{r}
+ctd6635_032823 <- read_xlsx("Dec2022-Mar2023_rough-ctd-emerald-6635.xlsx", sheet = "emerald-ctd-6635-data-edit")
+
+#plot time values as is and see if the trend for time of day is weird (then it might be UTC not EST)
+ctd6635_032823 %>% 
+  select(Timestamp:Depth, Salinity) %>% 
+  mutate(Timestamp = dmy_hms(Timestamp)) %>% 
+  mutate(reef = "Emerald") -> ctd6635_032823
+```
+
+## CTD7398 (Emerald) Apr-Jul Excel data
+```{r}
+ctd7398_071123 <- read_xlsx("apr23-jul23_rawdata/ctd-sn7398-edited.xlsx", sheet = "ctd-sn7398-edited")
+
+ctd7398_071123 %>% 
+  select(Timestamp.UTC, Temp, Cond, Depth, Salinity) %>% 
+  rename(Timestamp = Timestamp.UTC, Temperature = Temp, Conductivity = Cond) %>% 
+  filter(as.Date(Timestamp) > "2023-03-28") %>% 
+  mutate(reef = "Emerald") -> ctd7398_071123
+```
+
+## CTD7398 (MacN) Dec-Mar Excel
+```{r}
+ctd7398_032823 <- read_xlsx("Dec2022-Mar2023_rough-ctd-macnorth-7398.xlsx", sheet = "macnorth-ctd-7398-data-edit")
+
+ctd7398_032823 %>% 
+  select(Timestamp, Temperature, Conductivity, Depth, Salinity) %>% 
+  mutate(Timestamp = dmy_hms(Timestamp)) %>% 
+  mutate(reef = "MacNorth") -> ctd7398_032823
+```
+
+## CTD6635 (MacN) Apr-Jul 
+```{r}
+#data not tidied yet
+
+#try to read the hex file
+library(hexView)
+
+hexViewFile("~/Downloads/SBE16plus_01606635_2023_07_13.hex")
+
+#that didn't work it's not readable. needs to be run through the CTD software to extract readable numbers
+```
+
+
+## combine files and build temperature graph
+```{r}
+full_join(ctd6635_032823, ctd7398_071123) %>% 
+  full_join(., ctd7398_032823) %>% 
+  filter(as.Date(Timestamp) < "2023-04-01") %>% 
+  ggplot(., aes(x=Timestamp, y=Temperature, color = reef)) +
+  geom_point() +
+  geom_line() +
+  theme_classic() +
+  labs(x="Day", y = "Temperature (ºC)") +
+  scale_color_manual(values = c("#edb9c3", "#5370c9"))
+```
+## combine files and build salinity graph
+```{r}
+full_join(ctd6635_032823, ctd7398_071123) %>% 
+  full_join(., ctd7398_032823) %>% 
+  filter(as.Date(Timestamp) < "2023-04-01") %>% 
+  filter(Salinity > 31) %>% 
+  ggplot(., aes(x=Timestamp, y=Salinity, color = reef)) +
+  geom_point() +
+  geom_line() +
+  theme_classic() +
+  labs(x="Day", y = "Salinity") +
+  scale_color_manual(values = c("#edb9c3", "#5370c9"))
+```
+
