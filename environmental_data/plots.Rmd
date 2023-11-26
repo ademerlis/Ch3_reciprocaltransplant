@@ -9,12 +9,219 @@ output: html_document
 library(tidyverse)
 library(readxl)
 library(lubridate)
+library(cowplot)
+```
+
+Mike Jankulak created composite files of all time points for each site for each instrument. Some instruments were swapped between sites, so he made sure to group the sites correctly. There is a metadata file that shows all the instrument deployments.
+
+# Temperature
+
+## import STR files
+```{r}
+str_emerald <- read_excel("str-emerald-sn5042.xlsx", sheet = "str-emerald-sn5042")
+
+str_emerald$`Datetime (UTC)` <- as.POSIXct(str_emerald$`Datetime (UTC)`, tz="UTC")
+str_emerald$`Datetime (EST)` <- with_tz(str_emerald$`Datetime (UTC)`, "America/New_York")
+
+str_emerald %>% 
+  mutate(reef = "Emerald") %>% 
+  select(!Time) %>% 
+  select(!`Datetime (UTC)`) %>% 
+  select(!`Sample Number`) -> str_emerald
+  
+str_macnorth <- read_excel("str-macnorth-sn9235.xlsx", sheet = "str-macnorth-sn9235")
+
+str_macnorth$Datetime <- as.POSIXct(str_macnorth$Datetime, tz="UTC")
+str_macnorth$`Datetime (EST)` <- with_tz(str_macnorth$Datetime, "America/New_York")
+
+str_macnorth %>% 
+  mutate(reef = "MacNorth") %>% 
+  select(!Datetime) %>% 
+  select(!`Sample Number`) %>% 
+  select(!Time) -> str_macnorth
 ```
 
 
-# EcoPAR
+## just STR data
+```{r}
+full_join(str_emerald, str_macnorth) -> str_all
 
-## ecopar1959 raw txt data file
+# Identify the lowest and highest points
+lowest_point <- str_all %>% filter(Temperature == min(Temperature))
+highest_point <- str_all %>% filter(Temperature == max(Temperature))
+
+str_all %>% 
+  filter(Date >= "2022-12-06") %>% 
+ggplot(., aes(x=`Datetime (EST)`, y=Temperature, color = reef)) +
+  geom_line() +
+  theme_classic() +
+  labs(x="Day", y = "Temperature (ºC)") +
+  scale_color_manual(values = c("#edb9c3", "#5370c9")) +
+  geom_hline(yintercept = 31, linetype = "dashed", color = "black") +
+  annotate("text", x = as.POSIXct("2023-11-20"), y = 31, label = "31ºC", vjust = -1) +
+  geom_point(data = lowest_point, aes(`Datetime (EST)`, Temperature), color = "#5370c9", size = 2) +
+  geom_text(data = lowest_point, aes(`Datetime (EST)`, Temperature, label = "17.89ºC"), vjust = 1.1, hjust = -0.1, color = "black") +
+  geom_point(data = highest_point, aes(`Datetime (EST)`, Temperature), color = "#5370c9", size = 2) +
+  geom_text(data = highest_point, aes(`Datetime (EST)`, Temperature, label = "33.55ºC"), vjust = 0, hjust = -0.2, color = "black") +
+labs(title = "STR Data for 1-yr", x="Month") +
+  annotate("text", x = as.POSIXct("2023-09-30"), y = 18, label= "STR data at Emerald stopped 9/9", colour = "black", hjust = .56)
+```
+
+## append CTD temperature data for Emerald after 9/9/23
+```{r}
+ctd_emerald <- read_excel("ctd-emerald-composite.xlsx", sheet = "ctd-emerald-composite")
+
+ctd_emerald %>% 
+  select(`Timestamp UTC`, Temperature) -> ctd_emerald_temp
+
+ctd_emerald_temp$`Timestamp (UTC)` <- as.POSIXct(ctd_emerald_temp$`Timestamp UTC`, tz="UTC")
+ctd_emerald_temp$`Datetime (EST)` <- with_tz(ctd_emerald_temp$`Timestamp (UTC)`, "America/New_York")
+
+ctd_emerald_temp %>% 
+  mutate(Date = as.Date(`Datetime (EST)`)) %>% #the dates towards midnight don't match Datetime, it rounds up to the next day
+  select(-1,-3) %>% 
+  mutate(reef = "Emerald") %>% 
+  filter(Date >= "2023-09-09") -> ctd_emerald_temp_sept9
+
+str_all %>% 
+  filter(Date >= "2022-12-06") %>% 
+  full_join(ctd_emerald_temp_sept9) %>% 
+ggplot(., aes(x=`Datetime (EST)`, y=Temperature, color = reef)) +
+  geom_line() +
+  theme_classic() +
+  labs(x="Day", y = "Temperature (ºC)") +
+  scale_color_manual(values = c("#edb9c3", "#5370c9")) +
+  geom_hline(yintercept = 31, linetype = "dashed", color = "black") +
+  annotate("text", x = as.POSIXct("2023-11-20"), y = 31, label = "31ºC", vjust = -1) +
+  geom_point(data = lowest_point, aes(`Datetime (EST)`, Temperature), color = "#5370c9", size = 2) +
+  geom_text(data = lowest_point, aes(`Datetime (EST)`, Temperature, label = "17.89ºC"), vjust = 1.1, hjust = -0.1, color = "black") +
+  geom_point(data = highest_point, aes(`Datetime (EST)`, Temperature), color = "#5370c9", size = 2) +
+  geom_text(data = highest_point, aes(`Datetime (EST)`, Temperature, label = "33.55ºC"), vjust = 0, hjust = -0.2, color = "black") +
+labs(title = "STR + CTD Data for 1-yr", x="Month")
+```
+
+## calculating maximum monthly mean temperature over experiment time period for each reef
+```{r}
+str_all %>% 
+  filter(Date >= "2022-12-06") %>% 
+  full_join(ctd_emerald_temp_sept9) -> temp_data
+ 
+temp_data %>% 
+  select(!Date) %>% 
+  separate(`Datetime (EST)`, into = c("Date", "Time"), sep = " ") %>% 
+  mutate(Date = ymd(Date)) %>% 
+  group_by(Date, reef) %>% 
+  summarise(max_temp = max(Temperature)) %>% 
+  mutate(year_month = paste(year(Date), month(Date), sep = "-")) %>% 
+  mutate(year_month = ym(year_month)) %>% 
+  group_by(year_month, reef) %>% 
+  summarise(mean_max_temp = mean(max_temp)) %>% 
+  group_by(reef) %>% 
+  summarise(MMM = mean(mean_max_temp))
+```
+
+## calculate the maximum summertime mean
+```{r}
+temp_data %>% 
+  select(!Date) %>% 
+  filter(as.Date(`Datetime (EST)`) >= "2023-06-01" & as.Date(`Datetime (EST)`) <= "2023-09-01") %>% 
+  separate(`Datetime (EST)`, into = c("Date", "Time"), sep = " ") %>% 
+  mutate(Date = ymd(Date)) %>% 
+  group_by(Date, reef) %>% 
+  summarise(max_temp = max(Temperature)) %>% 
+  mutate(year_month = paste(year(Date), month(Date), sep = "-")) %>% 
+  mutate(year_month = ym(year_month)) %>% 
+  group_by(year_month, reef) %>% 
+  summarise(mean_max_temp = mean(max_temp)) %>% 
+  group_by(reef) %>% 
+  summarise(MMM = mean(mean_max_temp)) #mean summertime temp
+```
+
+
+## calculate DHW (weeks spent above the mean maximum summertime temp)
+```{r}
+temp_data %>% 
+  filter(reef == "Emerald") %>% 
+  filter(Temperature > 30.16728) %>% 
+  distinct(Date) #89 days above?? That is 12.7 weeks
+
+temp_data %>% 
+  filter(reef == "Emerald") %>% 
+  filter(Temperature > 31) 
+```
+
+## graph focusing on summertime
+```{r}
+str_all %>% 
+  full_join(ctd_emerald_temp_sept9) %>% 
+  filter(as.Date(`Datetime (EST)`) <= "2023-10-01" & as.Date(`Datetime (EST)`) >= "2023-05-31") %>% 
+ggplot(., aes(x=`Datetime (EST)`, y=Temperature, color = reef)) +
+  geom_line() +
+  theme_classic() +
+  labs(x="Day", y = "Temperature (ºC)") +
+  scale_color_manual(values = c("#edb9c3", "#5370c9")) +
+  geom_hline(yintercept = 31, linetype = "dashed", color = "black") +
+  annotate("text", x = as.POSIXct("2023-10-01"), y = 31, label = "31ºC", vjust = -1) +
+  annotate("text", x = as.POSIXct("2023-09-30"), y = 33, label= "Days Above 31ºC:\nEmerald=44\nMacNorth=85", colour = "black", hjust=1) 
+
+# Display the plot
+
+temp_data %>% 
+  select(!Date) %>% 
+  filter(as.Date(`Datetime (EST)`) >= "2023-06-01" & as.Date(`Datetime (EST)`) <= "2023-10-01") %>% 
+  separate(`Datetime (EST)`, into = c("Date", "Time"), sep = " ") %>% 
+  mutate(Date = ymd(Date)) %>% 
+  group_by(Date, reef) %>% 
+  summarise(max_temp = max(Temperature)) %>% 
+  filter(max_temp > 31) %>% 
+  group_by(reef) %>% 
+  summarise(count = n())
+```
+
+## daily variability experienced
+```{r}
+temp_data %>% 
+  select(!Date) %>% 
+  separate(`Datetime (EST)`, into = c("Date", "Time"), sep = " ") %>% 
+  mutate(Date = ymd(Date)) %>% 
+  group_by(Date, reef) %>% 
+  summarise(daily_min = min(Temperature), daily_max=max(Temperature)) %>% 
+  mutate(daily_range=daily_max - daily_min) %>% 
+  ungroup() %>% 
+  ggplot(., aes(x=Date, y=daily_range, color = reef)) +
+  geom_point() +
+  geom_line() +
+  labs(x="Day", y = "Daily range (ºC)") +
+  scale_color_manual(values = c("#edb9c3", "#5370c9")) + 
+  theme_classic()
+
+temp_data %>% 
+  select(!Date) %>% 
+  separate(`Datetime (EST)`, into = c("Date", "Time"), sep = " ") %>% 
+  mutate(Date = ymd(Date)) %>% 
+  group_by(Date, reef) %>% 
+  summarise(daily_min = min(Temperature), daily_max=max(Temperature)) %>% 
+  mutate(daily_range=daily_max - daily_min) %>% 
+  ungroup() %>% 
+  ggplot(., aes(x=Date, y=daily_range, color = reef)) +
+  geom_point() +
+  geom_smooth() +
+  labs(x="Day", y = "Daily range (ºC)") +
+  scale_color_manual(values = c("#edb9c3", "#5370c9")) + 
+  theme_classic()
+```
+
+
+# PAR
+
+# Salinity
+
+
+# old data analysis 
+
+## EcoPAR
+
+### ecopar1959 raw txt data file
 ```{r}
 #look at raw data file 
 ecopar1959_032823 <- read_tsv("environmental_data/nov22-mar23_rawdata/ecopar-sn5954-tag1959.raw.txt")
@@ -55,7 +262,7 @@ ecopar1959_032823 %>% #53,652 values
 
 
 
-## ecopar1959 (Emerald) Dec-Mar Excel tidy data
+### ecopar1959 (Emerald) Dec-Mar Excel tidy data
 ```{r}
 ecopar1959_032823_excel <-read_xlsx("Dec2022-Mar2023_rough-ecopar-sn5954-tag1959-emerald.xlsx", sheet = "sheet1")
 
@@ -123,7 +330,7 @@ ecopar1959_032823_excel %>% #53,621 values
   labs(x="Day", y = "PAR (mol/day)")
 ```
 
-## ecopar4298 (Emerald) Apr-Jul Excel tidy data
+### ecopar4298 (Emerald) Apr-Jul Excel tidy data
 ```{r}
 ecopar4298_071123_excel <- read_xlsx("apr23-jul23_rawdata/ecopar-sn5954-tag4298_Emerald.xlsx", sheet = "ecopar-sn5954-tag4298.raw")
 
@@ -151,7 +358,7 @@ ecopar4298_071123_excel %>% #47,040 values
 ```
 
 
-## ecopar1960 (MacN) Dec-Mar Excel tidy data
+### ecopar1960 (MacN) Dec-Mar Excel tidy data
 ```{r}
 ecopar1960_032823_excel <-read_excel("Dec2022-Mar2023_rough-ecopar-sn5953-tag1960-macnorth.xlsx", sheet = "ecopar-sn5953-tag1960.raw")
 
@@ -178,7 +385,7 @@ ecopar1960_032823_excel %>% #47,040 values
   labs(x="Day", y = "PAR (mol/day)")
 ```
 
-## ecopar4297 (MacN) Apr-Jul Excel tidy data
+### ecopar4297 (MacN) Apr-Jul Excel tidy data
 ```{r}
 ecopar4297_071123_excel <- read_excel("apr23-jul23_rawdata/ecopar-sn5953-tag4297_MacNorth.xlsx", sheet = "ecopar-sn5953-tag4297.raw")
 
@@ -205,7 +412,7 @@ ecopar4297_071123_excel %>% #47,040 values
   labs(x="Day", y = "PAR (mol/day)")
 ```
 
-## combine all datasets into 1 so they can all be plotted together
+### combine all datasets into 1 so they can all be plotted together
 
 ```{r}
 ecopar1959_032823_excel %>% #53,621 values
@@ -281,7 +488,7 @@ all_ecopar_data_molperday %>%
   scale_color_manual(values = c("#edb9c3", "#5370c9"))
 ```
 
-## Stats 
+### Stats 
 
 ```{r}
 all_ecopar_data_molperday
@@ -312,13 +519,13 @@ TukeyHSD(ecopar_anova)
 
 
 
-# SeaFET
+## SeaFET
 
 
 
-# CTD
+## CTD
 
-## CTD6635 (Emerald) Dec-Mar Excel tidy data
+### CTD6635 (Emerald) Dec-Mar Excel tidy data
 ```{r}
 ctd6635_032823 <- read_xlsx("Dec2022-Mar2023_rough-ctd-emerald-6635.xlsx", sheet = "emerald-ctd-6635-data-edit")
 
@@ -329,7 +536,7 @@ ctd6635_032823 %>%
   mutate(reef = "Emerald") -> ctd6635_032823
 ```
 
-## CTD7398 (Emerald) Apr-Jul Excel data
+### CTD7398 (Emerald) Apr-Jul Excel data
 ```{r}
 ctd7398_071123 <- read_xlsx("apr23-jul23_rawdata/ctd-sn7398-edited.xlsx", sheet = "ctd-sn7398-edited")
 
@@ -340,7 +547,7 @@ ctd7398_071123 %>%
   mutate(reef = "Emerald") -> ctd7398_071123
 ```
 
-## CTD7398 (MacN) Dec-Mar Excel
+### CTD7398 (MacN) Dec-Mar Excel
 ```{r}
 ctd7398_032823 <- read_xlsx("Dec2022-Mar2023_rough-ctd-macnorth-7398.xlsx", sheet = "macnorth-ctd-7398-data-edit")
 
@@ -350,7 +557,7 @@ ctd7398_032823 %>%
   mutate(reef = "MacNorth") -> ctd7398_032823
 ```
 
-## CTD6635 (MacN) Apr-Jul 
+### CTD6635 (MacN) Apr-Jul 
 ```{r}
 #data not tidied yet
 
@@ -363,7 +570,7 @@ hexViewFile("~/Downloads/SBE16plus_01606635_2023_07_13.hex")
 ```
 
 
-## combine files and build temperature graph
+### combine files and build temperature graph
 ```{r}
 full_join(ctd6635_032823, ctd7398_071123) %>% 
   full_join(., ctd7398_032823) %>% 
@@ -375,7 +582,7 @@ full_join(ctd6635_032823, ctd7398_071123) %>%
   labs(x="Day", y = "Temperature (ºC)") +
   scale_color_manual(values = c("#edb9c3", "#5370c9"))
 ```
-## combine files and build salinity graph
+### combine files and build salinity graph
 ```{r}
 full_join(ctd6635_032823, ctd7398_071123) %>% 
   full_join(., ctd7398_032823) %>% 
