@@ -50,6 +50,8 @@ full_join(str_emerald, str_macnorth) -> str_all
 lowest_point <- str_all %>% filter(Temperature == min(Temperature))
 highest_point <- str_all %>% filter(Temperature == max(Temperature))
 
+str_all %>% filter(reef == "Emerald") %>% filter(Temperature == max(Temperature))
+
 str_all %>% 
   filter(Date >= "2022-12-06") %>% 
 ggplot(., aes(x=`Datetime (EST)`, y=Temperature, color = reef)) +
@@ -63,8 +65,8 @@ ggplot(., aes(x=`Datetime (EST)`, y=Temperature, color = reef)) +
   geom_text(data = lowest_point, aes(`Datetime (EST)`, Temperature, label = "17.89ºC"), vjust = 1.1, hjust = -0.1, color = "black") +
   geom_point(data = highest_point, aes(`Datetime (EST)`, Temperature), color = "#5370c9", size = 2) +
   geom_text(data = highest_point, aes(`Datetime (EST)`, Temperature, label = "33.55ºC"), vjust = 0, hjust = -0.2, color = "black") +
-labs(title = "STR Data for 1-yr", x="Month") +
-  annotate("text", x = as.POSIXct("2023-09-30"), y = 18, label= "STR data at Emerald stopped 9/9", colour = "black", hjust = .56)
+labs(title = "2022-2023 Temperature Data at Emerald Reef and MacArthur Causeway", x="Month") 
+  #annotate("text", x = as.POSIXct("2023-09-30"), y = 18, label= "STR data at Emerald stopped 9/9", colour = "black", hjust = .56)
 ```
 
 ## append CTD temperature data for Emerald after 9/9/23
@@ -97,7 +99,7 @@ ggplot(., aes(x=`Datetime (EST)`, y=Temperature, color = reef)) +
   geom_text(data = lowest_point, aes(`Datetime (EST)`, Temperature, label = "17.89ºC"), vjust = 1.1, hjust = -0.1, color = "black") +
   geom_point(data = highest_point, aes(`Datetime (EST)`, Temperature), color = "#5370c9", size = 2) +
   geom_text(data = highest_point, aes(`Datetime (EST)`, Temperature, label = "33.55ºC"), vjust = 0, hjust = -0.2, color = "black") +
-labs(title = "STR + CTD Data for 1-yr", x="Month")
+labs(title = "2022-2023 Temperature Data at Emerald Reef and MacArthur Causeway", x="Month") 
 ```
 
 ## calculating maximum monthly mean temperature over experiment time period for each reef
@@ -215,6 +217,20 @@ temp_data %>%
 # PAR
 
 # Salinity
+
+# Tilt
+
+load packages
+```{r}
+library(RColorBrewer)
+library(scales)
+library(lubridate)
+library(openair)
+```
+
+```{r}
+
+```
 
 
 # old data analysis 
