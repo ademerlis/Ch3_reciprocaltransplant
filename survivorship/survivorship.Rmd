@@ -5,53 +5,185 @@ date: "2023-04-17"
 output: html_document
 ---
 
+# Load packages and data
 ```{r}
 library(tidyverse)
 library(survival)
 library(ggpubr)
 library(survminer)
-survivorship <- read.csv("survivorship_data_07112023.csv")
+library(coxme)
+library(ggsurvfit)
+library(gtsummary)
+
+survivorship <- readxl::read_xlsx("survivorship_data.xlsx", sheet = "Sheet3")
+survivorship$Genet <- as.factor(survivorship$Genet)
+```
+# Definitions 
+
+Kaplan-Meier survivorship curves are built off of data that use binary encoding for time-to-event and censoring.
+Time-to-event is the number of days until the event happened.
+In my case, it would be time to mortality. 
+
+1 = event (mortality)
+0 = censored
+
+Censoring occurs if a subject has not experienced the event of interest by the end of data collection. 
+
+Reference: https://www.emilyzabor.com/tutorials/survival_analysis_in_r_tutorial.html 
+
+# All time points
+
+## Kaplan-Meier survivorship curve grouped by transplant
+```{r}
+Surv(survivorship$DaysToDeath, survivorship$StatusAtEnd)
+
+s1 <- survfit(Surv(DaysToDeath, StatusAtEnd) ~ Transplant, data = survivorship)
+str(s1)
+
+survfit2(Surv(DaysToDeath, StatusAtEnd) ~ Transplant, data = survivorship) %>% 
+  ggsurvfit() +
+  labs(x = "Days", y = "Overall survival probability") +
+  scale_ggsurvfit() +
+  add_pvalue(caption = "Log-rank {p.value}") +
+  add_pvalue(location  = "annotation", x = 15)
+```
+
+## adjusted Cox Proportion Hazards Regression model to include Genet 
+```{r}
+coxph(Surv(DaysToDeath, StatusAtEnd) ~ Genet + strata(Transplant), data = survivorship) %>%
+  survfit2() %>%
+  ggsurvfit()
+```
+## Assessing proportional hazards
+
+### Checking assumptions are met 
+
+One assumption of the Cox proportional hazards regression model is that the hazards are proportional at each point in time throughout follow-up. The cox.zph() function from the {survival} package allows us to check this assumption. 
+```{r}
+mv_fit <- coxph(Surv(DaysToDeath, StatusAtEnd) ~ Genet + Transplant, data = survivorship)
+cz <- cox.zph(mv_fit)
+print(cz) # Genet and transplant are not significant, so they meet the assumptions
+```
+
+### Estimating x-year survival
+
+One quantity often of interest in a survival analysis is the probability of surviving beyond a certain number of years, x.
+```{r}
+summary(survfit(Surv(DaysToDeath, StatusAtEnd) ~ Transplant, data = survivorship), times = 350) #350 days in 
+```
+
+### Estimating median survival time
+
+Another quantity often of interest in a survival analysis is the average survival time, which we quantify using the median. Survival times are not expected to be normally distributed so the mean is not an appropriate summary.
+```{r}
+survfit(Surv(DaysToDeath, StatusAtEnd) ~ Transplant, data = survivorship)
 ```
 
 
+
+### Comparing survival times between groups
+
+We can conduct between-group significance tests using a log-rank test. The log-rank test equally weights observations over the entire follow-up time and is the most common way to compare survival times between groups. There are versions that more heavily weight the early or late follow-up that could be more appropriate depending on the research question (see ?survdiff for different test options).
+
+We get the log-rank p-value using the survdiff function.
 ```{r}
-survivorship %>% 
-  pivot_longer(T0_mortality:T3_mortality, names_to = "TimePoint", values_to = "Binary_deadoralive") %>% 
-  mutate(Binary_deadoralive = as.factor(Binary_deadoralive)) %>% #change time point to days
-  mutate(time = case_when(TimePoint == "T0_mortality" ~ 0,
-                         TimePoint == "T1_mortality" ~ 51,
-                         TimePoint == "T2_mortality" ~ 119,
-                         TimePoint == "T3_mortality" ~ 217)) -> df 
+survdiff(Surv(DaysToDeath, StatusAtEnd) ~ Transplant, data = survivorship)
+```
+
+### cox hazards ratio statistics
+```{r}
+coxph(Surv(DaysToDeath, StatusAtEnd) ~ Transplant, data = survivorship) %>% 
+  tbl_regression(exp = TRUE) 
+```
+
+
+Following Maddie Kaufman's code:
+```{r}
+# km survivorship curves ----
+# Kaplan-Meier is univariate; Cox proportional hazards is multivariable
+#null model: no random effects or treatment
+model0=coxph(Surv(DaysToDeath, StatusAtEnd) ~ 1, data = survivorship)
+summary(model0)
+
+#model without random effects but including treatment
+model1=coxph(Surv(DaysToDeath, StatusAtEnd) ~ Transplant, data = survivorship) 
+summary(model1)
+
+#model with treatment and genotype
+model2=coxph(Surv(DaysToDeath, StatusAtEnd) ~ Genet*Transplant, data = survivorship) 
+summary(model2)
 
 # create survival object using the Kaplan-Meier method
-surv <- Surv(time = df$time, event = df$Binary_deadoralive)
+surv <- Surv(time = survivorship$DaysToDeath, event = survivorship$StatusAtEnd)
 surv
 
 # run survival model for each species
-fit_reef <- survfit(surv ~ Transplant, data = df)
+fit_reef <- survfit(surv ~ Transplant, data = survivorship)
 summary(fit_reef)
 
-# Kaplan-Meier plots for each transplant
+ggsurvplot(fit_reef, data = survivorship, risk.table = TRUE, pval = TRUE, conf.int=TRUE)
+```
+
+Following Michael Studivan's code: (https://github.com/mstudiva/PortMiami-urban-coral-resilience/blob/main/coralrelocation/fisher%20survivorship.R)
+```{r}
+#### packages ####
+
+library(ggplot2)
+library(ggpubr)
+library(rcompanion)
+library(MASS)
+library(stringr)
+library(survival)
+library(survminer)
+library(dplyr)
+
+#### survivorship by species ####
+
+# create survival object using the Kaplan-Meier method
+surv <- Surv(time = survivorship$DaysToDeath, event = survivorship$StatusAtEnd)
+surv
+
+# run survival model for each transplantation direction
+fit_reef <- survfit(surv ~ Transplant, data = survivorship)
+summary(fit_reef)
+
+# Kaplan-Meier plots for each species
 fill.color<-c("#43a2ca", "#a97c50","#addd8e", "#006837")
 
-survival_species<-ggsurvplot(df, data = fit_reef, pval = TRUE, xlab="Days", ylab="Survival Probability",
-                                    conf.int = T, risk.table=T,palette=fill.color,
-                                    break.time.by=31, xlim=c(0,372), risk.table.y.text = FALSE) + ggtitle("Transplant") 
+survival_transplant<-ggsurvplot(fit_reef, data = survivorship, pval = TRUE, xlab="Days", ylab="Survival Probability",
+                                    conf.int = T, risk.table=T, palette=fill.color,
+                                    break.time.by=31, xlim=c(0,372), risk.table.y.text = FALSE) + ggtitle("Species") 
+survival_transplant
+
+# hazard ratio by species
+hazard_transplant <- coxph(surv ~ Transplant, data = survivorship)
+summary(hazard_transplant)
+
+# hazard ratio plot
+hazplot_transplant <- ggforest(hazard_transplant, data = survivorship)
+hazplot_transplant
+
+#### multiplot #####
+
+# survivorship by species and size figure
+multiplot<-ggarrange(survival_transplant$plot,
+                                     hazplot_transplant,
+                                     heights = c(2, 0.5, 0.75),
+                                     ncol = 2, nrow = 1)
+
+ggsave("survivorship.pdf", multiplot, width=20, height=6,dpi = 300)
 ```
 
+
+
+Coxme is the cox mixed-effects version of the cox proportional hazards model, and can include co-variates.
 ```{r}
-survivorship %>% 
-  pivot_longer(T0_mortality:T3_mortality, names_to = "TimePoint", values_to = "Binary_deadoralive") %>% 
-  mutate(Binary_deadoralive = as.factor(Binary_deadoralive)) %>% #change time point to days
-  mutate(time = case_when(TimePoint == "T0_mortality" ~ 0,
-                         TimePoint == "T1_mortality" ~ 51,
-                         TimePoint == "T2_mortality" ~ 119,
-                         TimePoint == "T3_mortality" ~ 217)) %>% 
-  group_by(Genet, Transplant, time, Binary_deadoralive) %>% 
-  summarise(count = n()) %>% 
-  ggplot(., aes(x=time, y=count, fill=Binary_deadoralive)) + geom_col() + facet_wrap(~Transplant) +
-  theme_classic() +
-  scale_fill_manual(values = c("#1c1b1b", "#628573")) +
-  labs(fill = "Mortality status", x = "Number of days", y = "Number of outplants")
+model <- coxme(Surv(DaysToDeath, StatusAtEnd) ~ (1|Genet) + Transplant, data = survivorship)
+summary(model)
+
+coxph(Surv(DaysToDeath, StatusAtEnd) ~ Genet + Transplant, data = survivorship)
+
+summary(coxph(Surv(DaysToDeath, StatusAtEnd) ~ Genet + Transplant, data = survivorship))
 ```
+
 
