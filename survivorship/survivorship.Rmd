@@ -15,7 +15,7 @@ library(coxme)
 library(ggsurvfit)
 library(gtsummary)
 
-survivorship <- readxl::read_xlsx("survivorship_data.xlsx", sheet = "Sheet3")
+survivorship <- readxl::read_xlsx("survivorship_data.xlsx", sheet = "kaplan meier data")
 survivorship$Genet <- as.factor(survivorship$Genet)
 ```
 # Definitions 
@@ -31,7 +31,14 @@ Censoring occurs if a subject has not experienced the event of interest by the e
 
 Reference: https://www.emilyzabor.com/tutorials/survival_analysis_in_r_tutorial.html 
 
-# All time points
+
+# Proportion survived bleaching
+
+
+
+
+
+# Kaplan-Meier Survivorship: All time points
 
 ## Kaplan-Meier survivorship curve grouped by transplant
 ```{r}
@@ -53,6 +60,13 @@ survfit2(Surv(DaysToDeath, StatusAtEnd) ~ Transplant, data = survivorship) %>%
 coxph(Surv(DaysToDeath, StatusAtEnd) ~ Genet + strata(Transplant), data = survivorship) %>%
   survfit2() %>%
   ggsurvfit()
+
+#~ Genet + strata(Transplant): This part of the formula specifies the independent variables.
+#Genet is a variable in the dataset. It could be a continuous variable, a categorical variable, 
+#or any other type of variable you're investigating to see how it affects the survival time.
+# strata(Transplant) is used to indicate that the model should stratify by the Transplant variable. Stratification here means the analysis is done separately within each stratum of Transplant, allowing for different baseline hazards in different strata but keeping the effect of Genet constant across strata.
+
+# Cox proportional hazards model to analyze how the variable Genet affects the survival time (DaysToDeath), while controlling for different levels of Transplant through stratification. 
 ```
 ## Assessing proportional hazards
 
@@ -109,8 +123,7 @@ summary(model0)
 model1=coxph(Surv(DaysToDeath, StatusAtEnd) ~ Transplant, data = survivorship) 
 summary(model1)
 
-#model with treatment and genotype
-model2=coxph(Surv(DaysToDeath, StatusAtEnd) ~ Genet*Transplant, data = survivorship) 
+model2 = coxme(Surv(DaysToDeath, StatusAtEnd) ~ Transplant + (1|Genet), data = survivorship)
 summary(model2)
 
 # create survival object using the Kaplan-Meier method
@@ -123,6 +136,30 @@ summary(fit_reef)
 
 ggsurvplot(fit_reef, data = survivorship, risk.table = TRUE, pval = TRUE, conf.int=TRUE)
 ```
+
+LRT function
+```{r}
+## Model comparison function
+
+#two *nested* models as input, in this case obj1 is the model without the predictor variable and obj2 is the model with the predictor variable 
+lrt <- function (obj1, obj2) {
+  L0 <- logLik(obj1)
+  L1 <- logLik(obj2)
+  L01 <- as.vector(- 2 * (L0 - L1))
+  df <- attr(L1, "df") - attr(L0, "df")
+  list(L01 = L01, df = df,
+       "p-value" = pchisq(L01, df, lower.tail = FALSE))
+}
+```
+
+
+Compare three models to see which one is best fit of data.
+```{r}
+#Compare mixed effects model versus only fixed effects model. If not significant, go with simpler model.
+anova(model0, model1, model2)
+```
+
+
 
 Following Michael Studivan's code: (https://github.com/mstudiva/PortMiami-urban-coral-resilience/blob/main/coralrelocation/fisher%20survivorship.R)
 ```{r}
@@ -163,6 +200,24 @@ summary(hazard_transplant)
 hazplot_transplant <- ggforest(hazard_transplant, data = survivorship)
 hazplot_transplant
 
+
+# run survival model for each transplantation direction with genet included
+fit_reefgenet <- survfit(surv ~ Genet+Transplant, data = survivorship)
+summary(fit_reefgenet)
+
+# Kaplan-Meier plot
+survival_transplantgenet<-ggsurvplot(fit_reefgenet, data = survivorship, pval = TRUE, xlab="Days", ylab="Survival Probability",
+                                     xlim=c(0,372), risk.table.y.text = FALSE)
+survival_transplantgenet
+
+# hazard ratio by species
+hazard_transplant <- coxph(surv ~ Transplant, data = survivorship)
+summary(hazard_transplant)
+
+# hazard ratio plot
+hazplot_transplant <- ggforest(hazard_transplant, data = survivorship)
+hazplot_transplant
+
 #### multiplot #####
 
 # survivorship by species and size figure
@@ -178,7 +233,7 @@ ggsave("survivorship.pdf", multiplot, width=20, height=6,dpi = 300)
 
 Coxme is the cox mixed-effects version of the cox proportional hazards model, and can include co-variates.
 ```{r}
-model <- coxme(Surv(DaysToDeath, StatusAtEnd) ~ (1|Genet) + Transplant, data = survivorship)
+model <- coxme(Surv(DaysToDeath, StatusAtEnd) ~ Transplant + (1|Genet), data = survivorship)
 summary(model)
 
 coxph(Surv(DaysToDeath, StatusAtEnd) ~ Genet + Transplant, data = survivorship)
@@ -186,4 +241,54 @@ coxph(Surv(DaysToDeath, StatusAtEnd) ~ Genet + Transplant, data = survivorship)
 summary(coxph(Surv(DaysToDeath, StatusAtEnd) ~ Genet + Transplant, data = survivorship))
 ```
 
+
+
+# Kaplan-Meier Survivorship: Only E-M and M-M
+```{r}
+survivorship %>% 
+  filter(Transplant == "Emerald -> MacN" | Transplant == "MacN -> MacN") -> surv_macN
+
+Surv(surv_macN$DaysToDeath, surv_macN$StatusAtEnd)
+
+s2 <- survfit(Surv(DaysToDeath, StatusAtEnd) ~ Transplant, data = surv_macN)
+str(s2)
+
+survfit2(Surv(DaysToDeath, StatusAtEnd) ~ Transplant, data = surv_macN) %>% 
+  ggsurvfit() +
+  labs(x = "Days", y = "Overall survival probability") +
+  scale_ggsurvfit() +
+  add_pvalue(caption = "Log-rank {p.value}") +
+  add_pvalue(location  = "annotation", x = 15)
+
+coxph(Surv(DaysToDeath, StatusAtEnd) ~ Genet + strata(Transplant), data = surv_macN) %>%
+  survfit2() %>%
+  ggsurvfit() 
+
+summary(coxph(Surv(DaysToDeath, StatusAtEnd) ~ Genet + strata(Transplant), data = surv_macN))
+
+coxme(Surv(DaysToDeath, StatusAtEnd) ~ Transplant + (1|Genet), data = surv_macN)
+```
+
+# Kaplan-Meier Survivorship: removing first time point
+```{r}
+survivorship %>%
+  filter(DaysToDeath != 51) -> surv_AprNov
+
+survfit2(Surv(DaysToDeath, StatusAtEnd) ~ Transplant, data = surv_AprNov) %>% 
+  ggsurvfit() +
+  labs(x = "Days", y = "Overall survival probability") +
+  scale_ggsurvfit() +
+  add_pvalue(caption = "Log-rank {p.value}") +
+  add_pvalue(location  = "annotation", x = 15)
+  
+summary(survfit(Surv(DaysToDeath, StatusAtEnd) ~ Transplant, data = surv_AprNov), times = 350)
+
+coxph(Surv(DaysToDeath, StatusAtEnd) ~ Genet + strata(Transplant), data = surv_AprNov) %>%
+  survfit2() %>%
+  ggsurvfit() 
+
+summary(coxph(Surv(DaysToDeath, StatusAtEnd) ~ Genet + strata(Transplant), data = surv_AprNov))
+
+coxme(Surv(DaysToDeath, StatusAtEnd) ~ Transplant + (1|Genet), data = surv_AprNov)
+```
 
