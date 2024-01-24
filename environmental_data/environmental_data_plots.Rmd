@@ -66,6 +66,7 @@ ggplot(., aes(x=`Datetime (EST)`, y=Temperature, color = reef)) +
   geom_point(data = highest_point, aes(`Datetime (EST)`, Temperature), color = "#5370c9", size = 2) +
   geom_text(data = highest_point, aes(`Datetime (EST)`, Temperature, label = "33.55ºC"), vjust = 0, hjust = -0.2, color = "black") +
 labs(title = "2022-2023 Temperature Data at Emerald Reef and MacArthur Causeway", x="Month") 
+
   #annotate("text", x = as.POSIXct("2023-09-30"), y = 18, label= "STR data at Emerald stopped 9/9", colour = "black", hjust = .56)
 ```
 
@@ -99,7 +100,9 @@ ggplot(., aes(x=`Datetime (EST)`, y=Temperature, color = reef)) +
   geom_text(data = lowest_point, aes(`Datetime (EST)`, Temperature, label = "17.89ºC"), vjust = 1.1, hjust = -0.1, color = "black") +
   geom_point(data = highest_point, aes(`Datetime (EST)`, Temperature), color = "#5370c9", size = 2) +
   geom_text(data = highest_point, aes(`Datetime (EST)`, Temperature, label = "33.55ºC"), vjust = 0, hjust = -0.2, color = "black") +
-labs(title = "2022-2023 Temperature Data at Emerald Reef and MacArthur Causeway", x="Month") 
+labs( x="Month") +
+  theme(text = element_text(size = 12))
+ggsave("temperatureplot.pdf", width = 6, height = 4)
 ```
 
 ## calculating maximum monthly mean temperature over experiment time period for each reef
@@ -210,7 +213,9 @@ temp_data %>%
   geom_smooth() +
   labs(x="Day", y = "Daily range (ºC)") +
   scale_color_manual(values = c("#edb9c3", "#5370c9")) + 
-  theme_classic()
+  theme_classic() +
+  theme(text = element_text(size = 15))
+#ggsave("dailyrangetemp.pdf")
 ```
 
 

@@ -52,7 +52,10 @@ survfit2(Surv(DaysToDeath, StatusAtEnd) ~ Transplant, data = survivorship) %>%
   labs(x = "Days", y = "Overall survival probability") +
   scale_ggsurvfit() +
   add_pvalue(caption = "Log-rank {p.value}") +
-  add_pvalue(location  = "annotation", x = 15)
+  add_pvalue(location  = "annotation", x = 300) +
+  theme(text = element_text(size = 15)) +
+  theme(legend.position = "right")
+ggsave("kaplanmeiercurve.pdf", width = 6, height = 4)
 ```
 
 ## adjusted Cox Proportion Hazards Regression model to include Genet 
