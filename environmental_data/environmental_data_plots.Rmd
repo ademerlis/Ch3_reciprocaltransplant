@@ -102,7 +102,7 @@ ggplot(., aes(x=`Datetime (EST)`, y=Temperature, color = reef)) +
   geom_text(data = highest_point, aes(`Datetime (EST)`, Temperature, label = "33.55ºC"), vjust = 0, hjust = -0.2, color = "black") +
 labs( x="Month") +
   theme(text = element_text(size = 12))
-ggsave("temperatureplot.pdf", width = 6, height = 4)
+#ggsave("temperatureplot.pdf", width = 6, height = 4)
 ```
 
 ## calculating maximum monthly mean temperature over experiment time period for each reef
@@ -219,9 +219,218 @@ temp_data %>%
 ```
 
 
+## Separating by season and summarizing temp data
+
+```{r}
+temp_data %>% 
+  select(!Date) %>% 
+  separate(`Datetime (EST)`, into = c("Date", "Time"), sep = " ") %>% 
+  mutate(Date = ymd(Date)) %>% 
+  mutate(Season = case_when(Date < "2023-05-01" ~ "Dry",
+                            Date >= "2023-05-01" ~ "Wet")) %>% 
+  ggplot(., aes(x=Season, y=Temperature, fill = reef)) +
+  geom_boxplot() +
+  labs(x="Season", y = "Temp (ºC)") +
+  scale_fill_manual(values = c("#edb9c3", "#5370c9")) + 
+  theme_classic()
+ggsave("boxplot_temp_byseason.pdf")
+```
+
+
+```{r}
+temp_data %>% 
+  select(!Date) %>% 
+  separate(`Datetime (EST)`, into = c("Date", "Time"), sep = " ") %>% 
+  mutate(Date = ymd(Date)) %>% 
+  mutate(Season = case_when(Date < "2023-05-01" ~ "Dry",
+                            Date >= "2023-05-01" ~ "Wet")) %>% 
+  group_by(Season, reef) %>% 
+  summarise(count=n(), mean_temp = mean(Temperature), sd_temp = sd(Temperature), min_temp = min(Temperature), max_temp= max(Temperature), range_temp = max_temp-min_temp) %>% 
+  write_csv("season_reef_tempsummary.csv")
+```
+
+
+
+
 # PAR
 
+```{r}
+ecopar_macnorth = readxl::read_xlsx("ecopar-macnorth-composite.xlsx", sheet = "ecopar-macnorth-composite")
+ecopar_emerald = readxl::read_xlsx("ecopar-emerald-composite.xlsx", sheet = "ecopar-emerald-composite")
+#10 measurements were taken instantaneously at every 30 min interval for each day.
+# PAR(avg) is the average over the 10 measurements at each interval
+
+ecopar_macnorth$`Datetime (EST)` <- with_tz(ecopar_macnorth$`Datetime (UTC)`, "America/New_York")
+ecopar_emerald$`Datetime (EST)` <- with_tz(ecopar_emerald$`Datetime (UTC)`, "America/New_York")
+
+ecopar_macnorth %>% 
+  select(!c("PAR (calc)", "Date", "Time", "Datetime (UTC)")) %>% 
+  drop_na() %>% 
+  filter(`Datetime (EST)` >= as.Date("2022-12-06")) %>% 
+  mutate(reef = "MacNorth") -> ecopar_macnorth_clean
+
+ecopar_emerald %>% 
+  select(!c("PAR (calc)", "Date", "Time", "Datetime (UTC)")) %>% 
+  drop_na() %>% 
+  filter(`Datetime (EST)` >= as.Date("2022-12-06")) %>% 
+  mutate(reef = "Emerald") -> ecopar_emerald_clean
+  
+rbind(ecopar_emerald_clean, ecopar_macnorth_clean) %>% 
+  select(`Datetime (EST)`, `PAR(avg)`, reef) %>% 
+  mutate(interval = floor_date(`Datetime (EST)`, unit = "30 minutes")) %>% 
+  mutate(hour = hour(interval), Date =as.Date(interval) ) %>% 
+  ungroup() %>% 
+  filter(hour >= 10 & hour <= 15) %>% 
+  group_by(Date, reef) %>% 
+  summarise(daily_dose = sum(`PAR(avg)`)) %>% 
+  mutate(PAR_mol_day = daily_dose/1000) %>% 
+  ggplot(., aes(x= Date , y=PAR_mol_day, color = reef)) +
+  theme_classic() +
+  geom_point() +
+  geom_line() + 
+  labs(x="Month", y = "PAR (mol/day)") +
+  scale_color_manual(values = c("#edb9c3", "#5370c9")) + 
+  theme(text = element_text(size = 15))
+#i think the PAR meter failed in July - Oct for MacNorth
+ggsave("PAR_wholetimeset.pdf")
+```
+
+```{r}
+rbind(ecopar_emerald_clean, ecopar_macnorth_clean) %>% 
+  select(`Datetime (EST)`, `PAR(avg)`, reef) %>% 
+  mutate(interval = floor_date(`Datetime (EST)`, unit = "30 minutes")) %>% 
+  mutate(hour = hour(interval), Date =as.Date(interval) ) %>% 
+  mutate(Season = case_when(Date < "2023-05-01" ~ "Dry",
+                            Date >= "2023-05-01" ~ "Wet")) %>% 
+  filter(hour >= 10 & hour <= 15) %>% 
+  group_by(Date, reef, Season) %>% 
+  summarise(daily_dose = sum(`PAR(avg)`)) %>% 
+  mutate(PAR_mol_day = daily_dose/1000) %>% 
+  ungroup() %>% 
+  group_by(reef, Season) %>% 
+  summarise(count=n(), mean_PARmolday=mean(PAR_mol_day), sd_PARmolday=sd(PAR_mol_day), min_PARmolday= min(PAR_mol_day), max_PARmolday=max(PAR_mol_day), range_PARmolday = max_PARmolday-min_PARmolday) %>% 
+  write_csv("PAR_molperday_summary.csv")
+```
+
+```{r}
+rbind(ecopar_emerald_clean, ecopar_macnorth_clean) %>% 
+  select(`Datetime (EST)`, `PAR(avg)`, reef) %>% 
+  mutate(interval = floor_date(`Datetime (EST)`, unit = "30 minutes")) %>% 
+  mutate(hour = hour(interval), Date =as.Date(interval) ) %>% 
+  mutate(Season = case_when(Date < "2023-05-01" ~ "Dry",
+                            Date >= "2023-05-01" ~ "Wet")) %>% 
+  filter(hour >= 10 & hour <= 15) %>% 
+  group_by(Date, reef, Season) %>% 
+  summarise(daily_dose = sum(`PAR(avg)`)) %>% 
+  mutate(PAR_mol_day = daily_dose/1000) %>%  
+  ggplot(., aes(x= Season , y=PAR_mol_day, fill = reef)) +
+  theme_classic() +
+  geom_boxplot() +
+  labs(x="Season", y = "PAR (mol/day)") +
+  scale_fill_manual(values = c("#edb9c3", "#5370c9")) + 
+  theme(text = element_text(size = 15))
+ggsave("PAR_boxplot_season.pdf")
+```
+
+
 # Salinity
+
+```{r}
+ctd_emerald <- read_xlsx("ctd-emerald-composite.xlsx", sheet = "ctd-emerald-composite")
+
+ctd_emerald$`Datetime (EST)` <- with_tz(ctd_emerald$`Timestamp UTC`, "America/New_York")
+
+ctd_emerald %>% 
+  select(`Datetime (EST)`, Salinity) %>% 
+  mutate(reef = "Emerald") %>% 
+  filter(`Datetime (EST)` >= as.Date("2022-12-06")) -> ctd_emerald_salinity
+
+ctd_macnorth <- read_xlsx("ctd-macnorth-composite.xlsx", sheet = "ctd-macnorth-composite")
+
+ctd_macnorth$`Datetime (EST)` <- with_tz(ctd_macnorth$`Timestamp UTC`, "America/New_York")
+
+ctd_macnorth %>% 
+  select(`Datetime (EST)`, Salinity) %>% 
+  mutate(reef = "MacNorth") %>% 
+  filter(`Datetime (EST)` >= as.Date("2022-12-06")) -> ctd_macnorth_salinity
+```
+
+
+```{r}
+rbind(ctd_emerald_salinity, ctd_macnorth_salinity) %>% 
+  mutate(Season = case_when(`Datetime (EST)` < as.Date("2023-05-01") ~ "Dry",
+                            `Datetime (EST)` >= as.Date("2023-05-01") ~ "Wet")) %>% 
+  group_by(reef, Season) %>% 
+  ggplot(., aes(x= `Datetime (EST)` , y=Salinity, color = reef)) +
+  theme_classic() +
+  geom_point() +
+  labs(x="Date", y = "Salinity") +
+  scale_color_manual(values = c("#edb9c3", "#5370c9")) + 
+  theme(text = element_text(size = 15))
+ggsave("salinity_continuous.pdf")
+
+rbind(ctd_emerald_salinity, ctd_macnorth_salinity) %>% 
+  mutate(Season = case_when(`Datetime (EST)` < as.Date("2023-05-01") ~ "Dry",
+                            `Datetime (EST)` >= as.Date("2023-05-01") ~ "Wet")) %>% 
+  group_by(reef, Season) %>% 
+  ggplot(., aes(x= Season , y=Salinity, fill = reef)) +
+  theme_classic() +
+  geom_boxplot() +
+  labs(x="Season", y = "Salinity") +
+  scale_fill_manual(values = c("#edb9c3", "#5370c9")) + 
+  theme(text = element_text(size = 15))
+ggsave("salinity_boxplot.pdf")
+```
+
+# Depth
+
+```{r}
+ctd_emerald <- read_xlsx("ctd-emerald-composite.xlsx", sheet = "ctd-emerald-composite")
+
+ctd_emerald$`Datetime (EST)` <- with_tz(ctd_emerald$`Timestamp UTC`, "America/New_York")
+
+ctd_emerald %>% 
+  select(`Datetime (EST)`, Depth) %>% 
+  mutate(reef = "Emerald") %>% 
+  filter(`Datetime (EST)` >= as.Date("2022-12-06")) -> ctd_emerald_depth
+
+ctd_macnorth <- read_xlsx("ctd-macnorth-composite.xlsx", sheet = "ctd-macnorth-composite")
+
+ctd_macnorth$`Datetime (EST)` <- with_tz(ctd_macnorth$`Timestamp UTC`, "America/New_York")
+
+ctd_macnorth %>% 
+  select(`Datetime (EST)`, Depth) %>% 
+  mutate(reef = "MacNorth") %>% 
+  filter(`Datetime (EST)` >= as.Date("2022-12-06")) -> ctd_macnorth_depth
+```
+
+```{r}
+rbind(ctd_emerald_depth, ctd_macnorth_depth) %>% 
+  mutate(Season = case_when(`Datetime (EST)` < as.Date("2023-05-01") ~ "Dry",
+                            `Datetime (EST)` >= as.Date("2023-05-01") ~ "Wet")) %>% 
+  group_by(reef, Season) %>% 
+  ggplot(., aes(x= `Datetime (EST)` , y=Depth, color = reef)) +
+  theme_classic() +
+  geom_point() +
+  labs(x="Date", y = "Depth (m)") +
+  scale_color_manual(values = c("#edb9c3", "#5370c9")) + 
+  theme(text = element_text(size = 15))
+ggsave("depth_continuous.pdf")
+
+
+rbind(ctd_emerald_depth, ctd_macnorth_depth) %>% 
+  mutate(Season = case_when(`Datetime (EST)` < as.Date("2023-05-01") ~ "Dry",
+                            `Datetime (EST)` >= as.Date("2023-05-01") ~ "Wet")) %>% 
+  group_by(reef, Season) %>% 
+  ggplot(., aes(x= Season , y=Depth, fill = reef)) +
+  theme_classic() +
+  geom_boxplot() +
+  labs(x="Season", y = "Depth (m)") +
+  scale_fill_manual(values = c("#edb9c3", "#5370c9")) + 
+  theme(text = element_text(size = 15))
+ggsave("depth_boxplot.pdf")
+```
+
 
 # Tilt
 
@@ -234,7 +443,27 @@ library(openair)
 ```
 
 ```{r}
+tilt_emerald<- read_xlsx("tilt-emerald-sn2102069-redacted.xlsx", sheet = "tilt-emerald-sn2102069")
+tilt_macnorth<- read_xlsx("tilt-macnorth-sn2102068-redacted.xlsx", sheet = "tilt-macnorth-sn2102068")
 
+tilt_emerald$DateTime_EST <- with_tz(tilt_emerald$DateTime, "America/New_York")
+tilt_macnorth$DateTime_EST <- with_tz(tilt_macnorth$DateTime, "America/New_York")
+
+tilt_emerald %>% 
+  rename(ws = `Speed (cm/s)`, wd = `Heading (degrees)`) %>% 
+  filter(DateTime_EST >= as.Date("2022-12-06")) %>% 
+  mutate(reef = "Emerald") -> tilt_emerald_clean
+
+tilt_macnorth %>% 
+  rename(ws = `Speed (cm/s)`, wd = `Heading (degrees)`) %>% 
+  filter(DateTime_EST >= as.Date("2022-12-06")) %>% 
+  mutate(reef = "MacNorth") -> tilt_macnorth_clean
+
+windRose(tilt_emerald_clean, ws.int=3, max.freq = 60, cols = brewer_pal(palette="Spectral", direction=-1)(6), breaks=6, paddle=FALSE, key.header="(cm/s)", key.footer="Emerald Reef")
+ggsave("tilt_emerald.pdf")
+
+windRose(tilt_macnorth_clean, ws.int=6, max.freq = 60, cols = brewer_pal(palette="Spectral", direction=-1)(6), breaks=6, paddle=FALSE, key.header="(cm/s)", key.footer="MacArthur North")
+ggsave("tilt_macnorth.pdf")
 ```
 
 
