@@ -460,7 +460,8 @@ tilt_macnorth %>%
   mutate(reef = "MacNorth") -> tilt_macnorth_clean
 
 windRose(tilt_emerald_clean, ws.int=3, max.freq = 60, cols = brewer_pal(palette="Spectral", direction=-1)(6), breaks=6, paddle=FALSE, key.header="(cm/s)", key.footer="Emerald Reef")
-ggsave("tilt_emerald.pdf")
+ggsave("tilt_emerald.png")
+
 
 windRose(tilt_macnorth_clean, ws.int=6, max.freq = 60, cols = brewer_pal(palette="Spectral", direction=-1)(6), breaks=6, paddle=FALSE, key.header="(cm/s)", key.footer="MacArthur North")
 ggsave("tilt_macnorth.pdf")
