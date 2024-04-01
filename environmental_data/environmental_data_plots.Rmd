@@ -10,6 +10,15 @@ library(tidyverse)
 library(readxl)
 library(lubridate)
 library(cowplot)
+library(ggpubr)
+library(openair)
+library(seacarb)
+library(scales)   # to access breaks/formatting functions
+library(gridExtra) # for arranging plots
+library(ggradar)
+library(doBy)
+library(reshape2)
+library(zoo)
 ```
 
 Mike Jankulak created composite files of all time points for each site for each instrument. Some instruments were swapped between sites, so he made sure to group the sites correctly. There is a metadata file that shows all the instrument deployments.
@@ -18,27 +27,27 @@ Mike Jankulak created composite files of all time points for each site for each 
 
 ## import STR files
 ```{r}
-str_emerald <- read_excel("str-emerald-sn5042.xlsx", sheet = "str-emerald-sn5042")
+str_emerald <- read_excel("raw_data/str-emerald-sn5042.xlsx", sheet = "str-emerald-sn5042")
 
 str_emerald$`Datetime (UTC)` <- as.POSIXct(str_emerald$`Datetime (UTC)`, tz="UTC")
 str_emerald$`Datetime (EST)` <- with_tz(str_emerald$`Datetime (UTC)`, "America/New_York")
 
 str_emerald %>% 
   mutate(reef = "Emerald") %>% 
-  select(!Time) %>% 
-  select(!`Datetime (UTC)`) %>% 
-  select(!`Sample Number`) -> str_emerald
+  dplyr::select(!Time) %>% 
+  dplyr::select(!`Datetime (UTC)`) %>% 
+  dplyr::select(!`Sample Number`) -> str_emerald
   
-str_macnorth <- read_excel("str-macnorth-sn9235.xlsx", sheet = "str-macnorth-sn9235")
+str_macnorth <- read_excel("raw_data/str-macnorth-sn9235.xlsx", sheet = "str-macnorth-sn9235")
 
 str_macnorth$Datetime <- as.POSIXct(str_macnorth$Datetime, tz="UTC")
 str_macnorth$`Datetime (EST)` <- with_tz(str_macnorth$Datetime, "America/New_York")
 
 str_macnorth %>% 
   mutate(reef = "MacNorth") %>% 
-  select(!Datetime) %>% 
-  select(!`Sample Number`) %>% 
-  select(!Time) -> str_macnorth
+  dplyr::select(!Datetime) %>% 
+  dplyr::select(!`Sample Number`) %>% 
+  dplyr::select(!Time) -> str_macnorth
 ```
 
 
@@ -72,17 +81,19 @@ labs(title = "2022-2023 Temperature Data at Emerald Reef and MacArthur Causeway"
 
 ## append CTD temperature data for Emerald after 9/9/23
 ```{r}
-ctd_emerald <- read_excel("ctd-emerald-composite.xlsx", sheet = "ctd-emerald-composite")
+ctd_emerald <- read_excel("raw_data/ctd-emerald-composite.xlsx", sheet = "ctd-emerald-composite")
 
 ctd_emerald %>% 
-  select(`Timestamp UTC`, Temperature) -> ctd_emerald_temp
+  dplyr::select(`Timestamp UTC`, Temperature) -> ctd_emerald_temp
 
 ctd_emerald_temp$`Timestamp (UTC)` <- as.POSIXct(ctd_emerald_temp$`Timestamp UTC`, tz="UTC")
 ctd_emerald_temp$`Datetime (EST)` <- with_tz(ctd_emerald_temp$`Timestamp (UTC)`, "America/New_York")
 
-ctd_emerald_temp %>% 
-  mutate(Date = as.Date(`Datetime (EST)`)) %>% #the dates towards midnight don't match Datetime, it rounds up to the next day
-  select(-1,-3) %>% 
+ctd_emerald_temp %>%
+  mutate(Datetime_EST = `Datetime (EST)`) %>% 
+  separate(Datetime_EST, into = c("Date", "Time"), sep = " ") %>% 
+  mutate(Date = ymd(Date)) %>% 
+  dplyr::select(-1,-3) %>% 
   mutate(reef = "Emerald") %>% 
   filter(Date >= "2023-09-09") -> ctd_emerald_temp_sept9
 
@@ -101,10 +112,773 @@ ggplot(., aes(x=`Datetime (EST)`, y=Temperature, color = reef)) +
   geom_point(data = highest_point, aes(`Datetime (EST)`, Temperature), color = "#5370c9", size = 2) +
   geom_text(data = highest_point, aes(`Datetime (EST)`, Temperature, label = "33.55ºC"), vjust = 0, hjust = -0.2, color = "black") +
 labs( x="Month") +
-  theme(text = element_text(size = 12))
+  theme(text = element_text(size = 12)) 
 #ggsave("temperatureplot.pdf", width = 6, height = 4)
+
+str_all %>% 
+  filter(Date >= "2022-12-06") %>% 
+  full_join(ctd_emerald_temp_sept9) %>% 
+ggplot(., aes(x=`Datetime (EST)`, y=Temperature, color = reef)) +
+  geom_line() +
+  theme_classic() +
+  labs(x="Day", y = "Temperature (ºC)") +
+  scale_color_manual(values = c("#edb9c3", "#5370c9")) +
+labs( x="Month") +
+  theme(text = element_text(size = 12)) 
+#ggsave("temperatureplot_withMMM.png")
 ```
 
+## temp summary
+
+### get MMM from CRW
+```{r}
+library(raster)
+library(parallel)
+library(ncdf4)
+
+
+  # Read climatology file
+  Climatology_MMM <- "ct5km_climatology_v3.1.nc"
+  MMM.data <- brick(Climatology_MMM) 
+  #MMM.data
+  
+  # macNorth
+  lat_m <- (25.772927)
+  lon_m <- (-80.15263)
+  extract.pts_macn <- cbind(lon_m,lat_m)
+  
+  #emerald reef 
+  lat_em <- (25.67735)
+  lon_em <- (-80.097383)
+  extract_em <- cbind(lon_em, lat_em)
+  
+  
+  
+  #MMM <- raster::extract(MMM.data, extract.pts,method="bilinear")
+  MMM_mac <- raster::extract(MMM.data, extract.pts_macn,method="simple") #29.5
+  MMM_emerald <- raster::extract(MMM.data, extract_em,method="simple") #29.5
+
+  #write.csv(MMM_mac, "macnorth_CRW_MMM_1985-2012.csv", row.names=FALSE)
+
+ # write.csv(MMM_emerald, "emerald_CRW_MMM_1985-2012.csv", row.names=FALSE)
+
+```
+
+
+add season 
+```{r}
+all_temp_data %>% 
+  mutate(Season = case_when(`Datetime (EST)` < "2023-05-01 00:00:00" ~ "Dry",
+                            `Datetime (EST)` >= "2023-05-01 00:00:00" ~ "Wet")) -> all_temp_data
+```
+
+
+### temp summary for Site 
+```{r}
+str_all %>% 
+  filter(Date >= "2022-12-06") %>% 
+  full_join(ctd_emerald_temp_sept9) %>% 
+  dplyr::select(!Time) -> all_temp_data
+
+temp.summary<- summaryBy(Temperature ~ reef, data = all_temp_data,
+                         FUN = function(x) { c(max = max(x), min = min(x)) } )
+
+temp.summary$Temp.seasonal <- temp.summary$Temperature.max - temp.summary$Temperature.min
+
+# Daily Range
+Daily.range <- summaryBy(Temperature ~ Date + reef, data=all_temp_data, FUN=c(max,min,mean,sd))
+
+Daily.range$temp.daily.range <- Daily.range$Temperature.max - Daily.range$Temperature.min
+
+temp.d.range <- summaryBy(temp.daily.range ~ reef, data = Daily.range,
+                          FUN = function(x) { c(mean = mean(x)) } )
+Daily.range %>% 
+  filter(Temperature.max > 30.5) %>% 
+  group_by(reef) %>% 
+  dplyr::summarise(d.above.30.5 = n()) -> temp.d.30.5
+
+full_join(temp.summary, temp.d.range) %>% 
+  full_join(., temp.d.30.5) -> temp_summary
+```
+
+### DHW
+```{r}
+all_temp_data %>% 
+  dplyr::group_by(Date, reef) %>% 
+  mutate(mean_daily_temp = mean(Temperature)) %>% 
+  ungroup() %>% 
+  dplyr::select(!c("Temperature","Datetime (EST)")) %>% 
+  distinct() %>% 
+  mutate(HotSpot = case_when(reef == "MacNorth" ~ (mean_daily_temp - 29.55),
+                             reef == "Emerald" ~ (mean_daily_temp - 29.53))) %>% 
+  mutate(HotSpot = ifelse(HotSpot >= 0, HotSpot, 0)) %>% 
+  mutate(Stress = ifelse(HotSpot >= 1, HotSpot, 0)) %>% 
+  mutate(Weeks_Stress = Stress/7)  -> Long.data.DHW
+
+Long.data.DHW %>% 
+  filter(reef == "Emerald") -> DHW_emerald
+
+DHW_emerald$DHW<-rollapplyr(DHW_emerald$Weeks_Stress,list(-(83:0)),sum,fill=NA)
+
+Long.data.DHW %>% 
+  filter(reef == "MacNorth") -> DHW_mac
+
+DHW_mac$DHW<-rollapplyr(DHW_mac$Weeks_Stress,list(-(83:0)),sum,fill=NA)
+
+rbind(DHW_emerald, DHW_mac) %>% 
+ggplot(., aes(x=Date)) + 
+    geom_hline(yintercept=8, linetype="dashed")+
+    geom_hline(yintercept=4, linetype="dashed")+
+    geom_line(aes(y = DHW, color = reef)) +
+    ylab("DWH (C-week)  /  Temperature (C)") +
+    xlab("Date") +
+    theme_classic()  +
+  scale_color_manual(values = c("#edb9c3", "#5370c9"))
+#ggsave("DHW_linegraph.pdf")
+
+# Highest DWH per year
+rbind(DHW_emerald, DHW_mac) %>% 
+          group_by(reef) %>%
+          summarize(max = max(DHW, na.rm = TRUE)) %>% 
+          rename(maxDHW=max) -> MaxDHW
+
+```
+
+```{r}
+cbind(temp_summary, MaxDHW) %>% 
+  dplyr::select(-7) -> temp_summary_DHW
+
+write_csv(temp_summary_DHW, "temp_DHW_summary.csv")
+```
+
+## Radar plot
+```{r}
+scale_by_max <- function(x) {
+  x * 100 / max(x, na.rm = TRUE)
+}
+
+ temp_summary_DHW %>%
+   column_to_rownames(var="reef") %>% 
+  dplyr::mutate(across(everything(), as.numeric)) %>%
+  dplyr::mutate(across(everything(), scale_by_max)) -> temp_DHW_summary_percent
+
+# To use the fmsb package, I have to add 2 lines to the dataframe: the max and min of each variable to show on the plot!
+temp_DHW_summary_percent <- rbind(rep(100,5), rep(0,5), temp_DHW_summary_percent)
+
+# Color vector
+colors_border=c("#edb9c3", "#5370c9")
+colors_in=c("#edb9c3", "#5370c9")
+
+# Define colors with transparency using adjustcolor
+colors_border <- c(adjustcolor("#edb9c3", alpha = 0.9), adjustcolor("#5370c9", alpha = 0.9))
+colors_in <- c(adjustcolor("#edb9c3", alpha = 0.4), adjustcolor("#5370c9", alpha = 0.4))
+
+library(fmsb)
+# plot with default options:
+#pdf("radarchart_withDHW.pdf")
+radarchart(temp_DHW_summary_percent, axistype=1, 
+            #custom polygon
+            pcol=colors_border , pfcol=colors_in , plwd=4 , plty=1,
+            #custom the grid
+            cglcol="grey", cglty=1, axislabcol="grey", caxislabels=seq(0,100,25), cglwd=0.8,
+            #custom labels
+            vlcex=0.9
+)
+```
+
+
+
+# PAR
+
+```{r}
+ecopar_macnorth = readxl::read_xlsx("raw_data/ecopar-macnorth-composite.xlsx", sheet = "ecopar-macnorth-composite")
+ecopar_emerald = readxl::read_xlsx("raw_data/ecopar-emerald-composite.xlsx", sheet = "ecopar-emerald-composite")
+#10 measurements were taken instantaneously at every 30 min interval for each day.
+# PAR(avg) is the average over the 10 measurements at each interval
+
+ecopar_macnorth$`Datetime (EST)` <- with_tz(ecopar_macnorth$`Datetime (UTC)`, "America/New_York")
+ecopar_emerald$`Datetime (EST)` <- with_tz(ecopar_emerald$`Datetime (UTC)`, "America/New_York")
+
+ecopar_macnorth %>% 
+  dplyr::select(!c("PAR (calc)", "Date", "Time", "Datetime (UTC)")) %>% 
+  drop_na() %>% 
+  filter(`Datetime (EST)` >= as.Date("2022-12-06")) %>% 
+  mutate(reef = "MacNorth") -> ecopar_macnorth_clean
+
+ecopar_emerald %>% 
+  dplyr::select(!c("PAR (calc)", "Date", "Time", "Datetime (UTC)")) %>% 
+  drop_na() %>% 
+  filter(`Datetime (EST)` >= as.Date("2022-12-06")) %>% 
+  mutate(reef = "Emerald") -> ecopar_emerald_clean
+  
+rbind(ecopar_emerald_clean, ecopar_macnorth_clean) %>% 
+  dplyr::select(`Datetime (EST)`, `PAR(avg)`, reef) %>% 
+  mutate(interval = floor_date(`Datetime (EST)`, unit = "30 minutes")) %>% 
+  mutate(hour = hour(interval), Date =as.Date(interval) ) %>% 
+  ungroup() %>% 
+  filter(hour >= 10 & hour <= 15) %>% 
+  group_by(Date, reef) %>% 
+  summarise(daily_dose = sum(`PAR(avg)`)) %>% 
+  mutate(PAR_mol_day = daily_dose/1000) -> PAR_summary
+
+ parplot<- ggplot(PAR_summary, aes(x= Date , y=PAR_mol_day, color = reef)) +
+  theme_classic() +
+  geom_line() + 
+  labs(x="Month", y = "PAR (mol/day)") +
+  scale_color_manual(values = c("#edb9c3", "#5370c9")) + 
+  theme(text = element_text(size = 15))+
+   theme(legend.position = "none")
+#i think the PAR meter failed in July - Oct for MacNorth
+#ggsave("PAR_wholetimeset.pdf")
+```
+
+```{r}
+rbind(ecopar_emerald_clean, ecopar_macnorth_clean) %>% 
+  select(`Datetime (EST)`, `PAR(avg)`, reef) %>% 
+  mutate(interval = floor_date(`Datetime (EST)`, unit = "30 minutes")) %>% 
+  mutate(hour = hour(interval), Date =as.Date(interval) ) %>% 
+  mutate(Season = case_when(Date < "2023-05-01" ~ "Dry",
+                            Date >= "2023-05-01" ~ "Wet")) %>% 
+  filter(hour >= 10 & hour <= 15) %>% 
+  group_by(Date, reef, Season) %>% 
+  summarise(daily_dose = sum(`PAR(avg)`)) %>% 
+  mutate(PAR_mol_day = daily_dose/1000) %>% 
+  ungroup() %>% 
+  group_by(reef, Season) %>% 
+  summarise(count=n(), mean_PARmolday=mean(PAR_mol_day), sd_PARmolday=sd(PAR_mol_day), min_PARmolday= min(PAR_mol_day), max_PARmolday=max(PAR_mol_day), range_PARmolday = max_PARmolday-min_PARmolday) %>% 
+  write_csv("PAR_molperday_summary.csv")
+```
+
+```{r}
+rbind(ecopar_emerald_clean, ecopar_macnorth_clean) %>% 
+  select(`Datetime (EST)`, `PAR(avg)`, reef) %>% 
+  mutate(interval = floor_date(`Datetime (EST)`, unit = "30 minutes")) %>% 
+  mutate(hour = hour(interval), Date =as.Date(interval) ) %>% 
+  mutate(Season = case_when(Date < "2023-05-01" ~ "Dry",
+                            Date >= "2023-05-01" ~ "Wet")) %>% 
+  filter(hour >= 10 & hour <= 15) %>% 
+  group_by(Date, reef, Season) %>% 
+  summarise(daily_dose = sum(`PAR(avg)`)) %>% 
+  mutate(PAR_mol_day = daily_dose/1000) %>%  
+  ggplot(., aes(x= Season , y=PAR_mol_day, fill = reef)) +
+  theme_classic() +
+  geom_boxplot() +
+  labs(x="Season", y = "PAR (mol/day)") +
+  scale_fill_manual(values = c("#edb9c3", "#5370c9")) + 
+  theme(text = element_text(size = 15))
+ggsave("PAR_boxplot_season.pdf")
+```
+
+
+# Salinity
+
+```{r}
+ctd_emerald <- read_xlsx("raw_data/ctd-emerald-composite.xlsx", sheet = "ctd-emerald-composite")
+
+ctd_emerald$`Datetime (EST)` <- with_tz(ctd_emerald$`Timestamp UTC`, "America/New_York")
+
+ctd_emerald %>% 
+  dplyr::select(`Datetime (EST)`, Salinity) %>% 
+  mutate(reef = "Emerald") %>% 
+  filter(`Datetime (EST)` >= as.Date("2022-12-06")) -> ctd_emerald_salinity
+
+ctd_macnorth <- read_xlsx("raw_data/ctd-macnorth-composite.xlsx", sheet = "ctd-macnorth-composite")
+
+ctd_macnorth$`Datetime (EST)` <- with_tz(ctd_macnorth$`Timestamp UTC`, "America/New_York")
+
+ctd_macnorth %>% 
+  select(`Datetime (EST)`, Salinity) %>% 
+  mutate(reef = "MacNorth") %>% 
+  filter(`Datetime (EST)` >= as.Date("2022-12-06")) -> ctd_macnorth_salinity
+```
+
+```{r}
+rbind(ctd_emerald_salinity, ctd_macnorth_salinity)  -> ctd_salinity
+```
+
+
+```{r}
+rbind(ctd_emerald_salinity, ctd_macnorth_salinity) %>% 
+  mutate(Season = case_when(`Datetime (EST)` < as.Date("2023-05-01") ~ "Dry",
+                            `Datetime (EST)` >= as.Date("2023-05-01") ~ "Wet")) %>% 
+  group_by(reef, Season) %>% 
+  ggplot(., aes(x= `Datetime (EST)` , y=Salinity, color = reef)) +
+  theme_classic() +
+  geom_line() +
+  labs(x="Date", y = "Salinity") +
+  scale_color_manual(values = c("#edb9c3", "#5370c9")) + 
+  theme(text = element_text(size = 15))
+#ggsave("salinity_continuous.pdf")
+
+rbind(ctd_emerald_salinity, ctd_macnorth_salinity) %>% 
+  mutate(Season = case_when(`Datetime (EST)` < as.Date("2023-05-01") ~ "Dry",
+                            `Datetime (EST)` >= as.Date("2023-05-01") ~ "Wet")) %>% 
+  group_by(reef, Season) %>% 
+  ggplot(., aes(x= Season , y=Salinity, fill = reef)) +
+  theme_classic() +
+  geom_boxplot() +
+  labs(x="Season", y = "Salinity") +
+  scale_fill_manual(values = c("#edb9c3", "#5370c9")) + 
+  theme(text = element_text(size = 15)) 
+ggsave("salinity_boxplot.pdf")
+```
+
+there are some definite outliers. remove those and re-plot
+```{r}
+# Define the window size (e.g., for a couple of days, window_size = 2)
+window_size <- 3
+
+# Calculate the rolling maximum temperature within the specified range
+data <- ctd_salinity %>%
+  separate(`Datetime (EST)`, into = c("Date", "Time"), sep = " ") %>% 
+  dplyr::group_by(Date, reef) %>% 
+  dplyr::mutate(mean_daily_salinity = mean(Salinity)) %>% 
+  arrange(Date) %>%
+  mutate(RollingMax = rollmax(mean_daily_salinity, window_size, fill = NA, align = "right"),
+         RollingMin = rollapply(mean_daily_salinity, window_size, min, fill = NA, align = "right"),
+         MaxThreshold = RollingMax + 1,
+         MinThreshold = RollingMin - 1)
+
+# Filter out temperatures exceeding the threshold (+3 degrees from the rolling max)
+filtered_data <- data %>%
+  filter(Salinity <= MaxThreshold & Salinity >= MinThreshold)
+
+filtered_data %>% 
+  ggplot(., aes(x=as.Date(Date), y=Salinity, color=reef)) +
+  geom_point()
+  #ok this looks better
+```
+
+```{r}
+salinity_plot<- ggplot(filtered_data, aes(x= as.Date(Date), y=Salinity, color = reef)) +
+  theme_classic() +
+  geom_line() +
+  labs(x="Date", y = "Salinity") +
+  scale_color_manual(values = c("#edb9c3", "#5370c9")) + 
+  theme(text = element_text(size = 15)) +
+  theme(legend.position = "none")
+#ggsave("salinity_continuous.pdf")
+```
+
+
+
+# Depth
+
+```{r}
+ctd_emerald <- read_xlsx("raw_data/ctd-emerald-composite.xlsx", sheet = "ctd-emerald-composite")
+
+ctd_emerald$`Datetime (EST)` <- with_tz(ctd_emerald$`Timestamp UTC`, "America/New_York")
+
+ctd_emerald %>% 
+  select(`Datetime (EST)`, Depth) %>% 
+  mutate(reef = "Emerald") %>% 
+  filter(`Datetime (EST)` >= as.Date("2022-12-06")) -> ctd_emerald_depth
+
+ctd_macnorth <- read_xlsx("raw_data/ctd-macnorth-composite.xlsx", sheet = "ctd-macnorth-composite")
+
+ctd_macnorth$`Datetime (EST)` <- with_tz(ctd_macnorth$`Timestamp UTC`, "America/New_York")
+
+ctd_macnorth %>% 
+  select(`Datetime (EST)`, Depth) %>% 
+  mutate(reef = "MacNorth") %>% 
+  filter(`Datetime (EST)` >= as.Date("2022-12-06")) -> ctd_macnorth_depth
+```
+
+```{r}
+rbind(ctd_emerald_depth, ctd_macnorth_depth) %>% 
+  mutate(Season = case_when(`Datetime (EST)` < as.Date("2023-05-01") ~ "Dry",
+                            `Datetime (EST)` >= as.Date("2023-05-01") ~ "Wet")) %>% 
+  group_by(reef, Season) %>% 
+  ggplot(., aes(x= `Datetime (EST)` , y=Depth, color = reef)) +
+  theme_classic() +
+  geom_point() +
+  labs(x="Date", y = "Depth (m)") +
+  scale_color_manual(values = c("#edb9c3", "#5370c9")) + 
+  theme(text = element_text(size = 15))
+ggsave("depth_continuous.pdf")
+
+
+rbind(ctd_emerald_depth, ctd_macnorth_depth) %>% 
+  mutate(Season = case_when(`Datetime (EST)` < as.Date("2023-05-01") ~ "Dry",
+                            `Datetime (EST)` >= as.Date("2023-05-01") ~ "Wet")) %>% 
+  group_by(reef, Season) %>% 
+  ggplot(., aes(x= Season , y=Depth, fill = reef)) +
+  theme_classic() +
+  geom_boxplot() +
+  labs(x="Season", y = "Depth (m)") +
+  scale_fill_manual(values = c("#edb9c3", "#5370c9")) + 
+  theme(text = element_text(size = 15))
+ggsave("depth_boxplot.pdf")
+
+rbind(ctd_emerald_depth, ctd_macnorth_depth) -> depth_data
+
+depth_plot<- ggplot(depth_data, aes(x= `Datetime (EST)` , y=Depth, color = reef)) +
+  theme_classic() +
+  geom_line() +
+  labs(x="Date", y = "Depth (m)") +
+  scale_color_manual(values = c("#edb9c3", "#5370c9")) + 
+  theme(text = element_text(size = 15)) +
+  theme(legend.position = "none")
+```
+
+
+# pH
+
+```{r}
+library(openair)
+library(seacarb)
+```
+
+import seafet data
+```{r}
+phDataRaw_emerald <- read_excel("raw_data/seafet-emerald-composite.xlsx", sheet = "seafet-emerald-composite")
+
+phDataRaw_emerald$`Datetime (EST)` <- with_tz(phDataRaw_emerald$`DateTime (UTC+00:00)`, "America/New_York")
+
+phDataRaw_emerald %>% 
+  mutate(reef = "Emerald") %>% 
+  select(!Swap) -> pH_emerald
+
+
+phDataRaw_macnorth <- read_excel("raw_data/seafet-macnorth-composite.xlsx", sheet = "seafet-macnorth-composite")
+
+phDataRaw_macnorth$`Datetime (EST)` <- with_tz(phDataRaw_macnorth$`DateTime (UTC+00:00)`, "America/New_York")
+
+phDataRaw_macnorth %>% 
+  mutate(reef = "MacNorth") -> pH_macnorth
+
+rbind(pH_emerald, pH_macnorth) -> all_ph_data
+```
+
+round temperature data 
+```{r}
+str_macnorth$dateTimeEST5Rounded <- round_date(str_macnorth$`Datetime (EST)`, "5 minutes")
+
+str_all %>% 
+  full_join(ctd_emerald_temp_sept9) %>% 
+  filter(reef=="Emerald") %>% 
+  select(!Time) ->emerald_temp_data
+
+emerald_temp_data$dateTimeEST5Rounded <- round_date(emerald_temp_data$`Datetime (EST)`, "5 minutes")
+```
+
+
+import bottle sample data
+```{r}
+bottle_data<-read_csv("raw_data/bottle-data.csv")
+
+bottle_data$Date <- mdy(bottle_data$collected_date)
+bottle_data$Time <- hms(bottle_data$collected_time)
+bottle_data$rDateTime <-paste(bottle_data$Date, bottle_data$Time, sep = " ")
+bottle_data$rDateTime <- ymd_hms(bottle_data$rDateTime)
+bottle_data$rDateTime30Rounded <- round_date(bottle_data$rDateTime, "30 minutes")
+bottle_data$dateTimeEST5Rounded <- round_date(bottle_data$rDateTime, "5 minutes")
+
+bottle_data %>% 
+  mutate(reef = case_when(collected_site == "Emerald Reef" ~ "Emerald",
+                          collected_site == "Emerald Ree" ~ "Emerald",
+                          collected_site == "MacArthur Cswy North" ~ "MacNorth",
+                          collected_site == "MacArthur Causeway North" ~ "MacNorth",
+                          collected_site == "Mac North" ~ "MacNorth")) -> bottle_data
+
+bottleIter = nrow(bottle_data);#count number of rows in bottleDataRaw
+#look up seafet pH (internal) and str temperature for each bottle, where present
+for(i in 1:bottleIter){
+    if (bottle_data$reef[i] == "Emerald") {#determine site
+    phLookupLine = match(bottle_data$rDateTime30Rounded[i], pH_emerald$`Datetime (EST)`)#identify seafet row number for that site and time
+    bottle_data$phInt[i] = pH_emerald$`Internal pH (pH)`[phLookupLine]#grab the pH from that line and put it into the bottle data table
+    tempLookupLine = match(bottle_data$dateTimeEST5Rounded[i], str_emerald$dateTimeEST5Rounded)#identify the str row number for that site and time
+    bottle_data$tempSTR[i] = emerald_temp_data$Temperature[tempLookupLine]#grab the str temperature from that line and put it into the bottle data table
+  }
+   else if (bottle_data$reef[i] == "MacNorth") {#determine site
+    phLookupLine = match(bottle_data$rDateTime30Rounded[i], pH_macnorth$`Datetime (EST)`)#identify seafet row number for that site and time
+    bottle_data$phInt[i] = pH_macnorth$`Internal pH (pH)`[phLookupLine]#grab the pH from that line and put it into the bottle data table
+    tempLookupLine = match(bottle_data$dateTimeEST5Rounded[i], str_macnorth$dateTimeEST5Rounded)#identify the str row number for that site and time
+    bottle_data$tempSTR[i] = str_macnorth$Temperature[tempLookupLine]#grab the str temperature from that line and put it into the bottle data table
+   }
+}
+```
+
+
+```{r}
+#look at temp data comparison
+bottle_data %>% 
+  dplyr::select(collected_temp,rDateTime, reef, tempSTR) %>% 
+  pivot_longer(c(collected_temp, tempSTR),names_to="temp_measure", values_to="temp_value") %>% 
+  ggplot(., aes(x=rDateTime, y=temp_value, color=temp_measure)) +
+  facet_wrap(~reef) +
+  geom_point()
+
+bottle_data %>% 
+  dplyr::select(pH_measured,pH_calculated,rDateTime, reef, phInt) %>% 
+  pivot_longer(c(pH_measured,pH_calculated,phInt),names_to="pH_measure", values_to="pH_value") %>% 
+  ggplot(., aes(x=rDateTime, y=pH_value, color=pH_measure)) +
+  facet_wrap(~reef) +
+  geom_point()
+#ggsave("bottlesamples_vs_seafet.pdf")
+#definitely some differences between bottle samples and seafet measurements
+```
+
+```{r}
+for(i in 1:bottleIter){
+  if(is.na(bottle_data$collected_temp[i])){output = NA} #if tempSTR is absent, set output to NA
+  else { 
+    output = carb(flag=15, var1=bottle_data$TA_umol_kg[i]/1000000, var2=bottle_data$DIC_umol_kg[i]/1000000, S=bottle_data$calc_salinity[i],T=bottle_data$collected_temp[i], P=bottle_data$collected_depth[i], k1k2 = "l", kf = "pf", ks = "d", pHscale = "T")
+    bottle_data$phCalc[i] = output[6]
+  #calculates dic from pH and 
+    outputDic = carb(flag=8, var1=bottle_data$pH_measured[i], var2=bottle_data$TA_umol_kg[i]/1000000,  S=bottle_data$calc_salinity[i],T=bottle_data$collected_temp[i], P=bottle_data$collected_depth[i], k1k2 = "l", kf = "pf", ks = "d", pHscale = "T")
+    bottle_data$dicCalc[i] = outputDic[16]
+    bottle_data$dicCalc[i] = as.numeric(bottle_data$dicCalc[i])
+    bottle_data$pco2[i] = outputDic[13]
+    bottle_data$omegaArag[i] = outputDic[18]
+    }
+}
+```
+
+
+
+```{r}
+bottle_data
+#create dic check
+bottle_data$dicCalc<-(as.numeric(bottle_data$dicCalc)*1000000)
+bottle_data$dicDiff = (bottle_data$DIC_umol_kg-bottle_data$dicCalc)
+#make graphs for salinity normalization of TA and DIC
+
+taEndPointGraph <- ggplot(bottle_data, aes(x = calc_salinity, y = TA_umol_kg)) +
+  theme_light()+
+  geom_point(aes(color = reef), size = 3)+
+  scale_color_manual(values=c("#D69EA0","#2A5676"))+  
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  geom_smooth(method = 'lm', formula = y~x)+
+  stat_cor(label.x = 31, label.y = 2480) +
+  stat_regline_equation(label.x = 31, label.y = 2500)
+dicEndPointGraph <- ggplot(bottle_data, aes(x = calc_salinity, y = dicCalc)) +
+  theme_light()+
+  geom_point(aes(color = reef), size = 3)+
+  scale_color_manual(values=c("#D69EA0","#2A5676"))+  
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  geom_smooth(method = 'lm', formula = y~x)+
+  stat_cor(label.x = 31, label.y = 2380) +
+  stat_regline_equation(label.x = 31, label.y = 2400)
+taDicPointGraph <- ggplot(bottle_data, aes(x = TA_umol_kg, y = DIC_umol_kg)) +
+  theme_light()+
+  geom_point(aes(color = reef), size = 3)+
+  scale_color_manual(values=c("#D69EA0","#2A5676"))+  
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  geom_smooth(method = 'lm', formula = y~x)+
+  stat_cor(label.x = 2300, label.y = 2380) +
+  stat_regline_equation(label.x = 2300, label.y = 2400)
+taDicCalcPointGraph <- ggplot(bottle_data, aes(x = TA_umol_kg, y = dicCalc)) +
+  theme_light()+
+  geom_point(aes(color = reef), size = 3)+
+  scale_color_manual(values=c("#D69EA0","#2A5676"))+  
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  geom_smooth(method = 'lm', formula = y~x)+
+  stat_cor(label.x = 2300, label.y = 2380) +
+  stat_regline_equation(label.x = 2300, label.y = 2400)
+dicDiffTimeGraph <- ggplot(bottle_data, aes(x = rDateTime, y = dicDiff)) +
+  theme_light()+
+  geom_point(aes(color = reef), size = 3)+
+  scale_color_manual(values=c("#D69EA0","#2A5676"))+  
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+#dic Issues Graph
+ggarrange(taDicPointGraph, taDicCalcPointGraph, dicDiffTimeGraph, ncol = 3, nrow = 1)
+ggarrange(taEndPointGraph,dicEndPointGraph, ncol = 2, nrow = 1)
+#proceed with Friss salinity normalization from end point graph equations
+taEndMember = 2200
+dicEndMember = 3300
+bottle_data$ta35Friss = 35*((bottle_data$TA_umol_kg-taEndMember)/bottle_data$calc_salinity)+taEndMember
+bottle_data$dic35Friss = 35*((bottle_data$dicCalc-dicEndMember)/bottle_data$calc_salinity)+dicEndMember
+#graph TA vs DIC
+taDicFrissPointGraph <- ggplot(bottle_data, aes(x = dic35Friss, y = ta35Friss)) +
+  theme_light()+
+  geom_point(aes(color = reef), size = 3)+
+  scale_color_manual(values=c("#D69EA0","#2A5676"))+  
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  geom_smooth(method = 'lm', formula = y~x)+
+  stat_cor(label.x = 2000, label.y = 2500) +
+  stat_regline_equation(label.x = 2000, label.y = 2520)
+#create ta dic graph
+taDicFrissPointGraph
+#create ta and dc vs salinity graphs
+ggarrange(taEndPointGraph,dicEndPointGraph, taDicFrissPointGraph,ncol = 3, nrow = 1)
+#ggsave("TA_DIC_diagnosticgraphs.pdf", width = 10, height=7)
+```
+
+
+```{r}
+library(plyr)
+library(dplyr)
+
+#create bottle tables for all samples
+bottle_data$pco2<-as.numeric(bottle_data$pco2)
+bottle_data$omegaArag<-as.numeric(bottle_data$omegaArag)
+
+#add season
+numbRows = nrow(bottle_data)
+for(i in 1:numbRows){
+  if (bottle_data$rDateTime[i]>"2023-5-26" && bottle_data$rDateTime[i]<"2023-10-15"){bottle_data$precipitation[i] = "wet"}
+  else if (bottle_data$rDateTime[i]>"2022-5-26" && bottle_data$rDateTime[i]<"2022-10-15"){bottle_data$precipitation[i] = "wet"}
+  else {bottle_data$precipitation[i] = "dry"}
+}
+
+
+bottleSummary <- ddply(bottle_data, c("reef","precipitation"), summarise,
+                             countSalinityDensitometer = length(dicCalc),
+                             meanSalinityDensitometer = round(mean(calc_salinity),2),
+                             sdSalinityDensitometer   = round(sd(calc_salinity),2),
+                             meanSpecPhField = round(mean(pH_measured, na.rm=TRUE),3),
+                             sdSpecPhField   = round(sd(pH_measured, na.rm=TRUE),3),
+                             meanTaCorrected = round(mean(TA_umol_kg, na.rm=TRUE),1),
+                             sdTaCorrected   = round(sd(TA_umol_kg, na.rm=TRUE),1),
+                             meanDicCalc = round(mean(dicCalc, na.rm=TRUE),1),
+                             sdDicCalc   = round(sd(dicCalc, na.rm=TRUE),2),
+                             meanTaFriss = round(mean(ta35Friss, na.rm=TRUE),1),
+                             sdTaFriss   = round(sd(ta35Friss, na.rm=TRUE),1),
+                             meanDicFriss = round(mean(dic35Friss, na.rm=TRUE),1),
+                             sdDicFriss   = round(sd(dic35Friss, na.rm=TRUE),1),                            
+                             meanPco2 = round(mean(pco2, na.rm=TRUE),0),
+                             sdPco2   = round(sd(pco2, na.rm=TRUE),0),
+                             meanOmegaArag = round(mean(omegaArag, na.rm=TRUE),2),
+                             sdOmegaArag   = round(sd(omegaArag, na.rm=TRUE),2)
+)
+bottleSummary
+```
+
+
+```{r}
+#plot TA and DIC as a function of time
+dicTimeGraph <- ggplot(bottle_data, aes(x = collected_time, y = dicCalc)) +
+  theme_light()+
+  geom_point(aes(color = reef, shape = precipitation), size = 3)+
+  scale_color_manual(values=c("#D69EA0","#2A5676")) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+taTimeGraph <- ggplot(bottle_data, aes(x = collected_time, y = TA_umol_kg)) +
+  theme_light()+
+  geom_point(aes(color = reef, shape = precipitation), size = 3)+
+  scale_color_manual(values=c("#D69EA0","#2A5676"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+ggarrange(taTimeGraph,dicTimeGraph, ncol = 2, nrow = 1)
+#ggsave("TA_DIC_timeofday.pdf",width=10,height=7)
+```
+
+```{r}
+#calculate the particular seafet offset for each bottle sample
+for(i in 1:bottleIter){
+  if(is.na(bottle_data$pH_measured[i])){#if spec pH field is absent, use the pH calculated from dic and ta
+#    bottleDataRaw$offset[i] =1
+    bottle_data$offset[i] = (bottle_data$phInt[i] - as.numeric(bottle_data$phCalc[i]))
+    bottle_data$phUsedOffset[i] = as.numeric(bottle_data$phCalc[i])
+    bottle_data$offsetSource[i] = "calc"
+    
+  } 
+  else {
+#    bottleDataRaw$offset[i] =2
+    bottle_data$offset[i] = (bottle_data$phInt[i] - bottle_data$pH_measured[i])
+    bottle_data$phUsedOffset[i] = bottle_data$pH_measured[i]
+    bottle_data$offsetSource[i] = "spec"
+  }
+}
+```
+
+```{r}
+pH_plot<-ggplot()+
+  geom_line(data = all_ph_data, aes(x = `Datetime (EST)`, y = `Internal pH (pH)`,  color = reef)) +
+  geom_point(data = bottle_data, aes(x = rDateTime, y = phUsedOffset, color = reef, shape = offsetSource)) +
+  scale_shape_manual(values=c(15, 19))+
+  scale_color_manual(values=c("#edb9c3", "#5370c9"))+  
+  theme_classic()+
+  scale_y_continuous(name = "pH Int", limits = c(7.15,8.15), labels = scales::number_format(accuracy = 0.1))+
+  theme(text = element_text(size = 15))+
+  geom_line() +
+  theme(legend.position = "none")
+#ggsave("seafetdata_uncorrected.pdf")
+```
+
+use offset to adjust internal pH values from seafets
+```{r}
+#first break up year-long dataset into collection time points so offsets from each deployment match
+
+bottle_data %>% 
+  select(collected_date,reef,offset) %>% 
+  drop_na() %>% 
+  mutate(collected_date=mdy(collected_date)) -> offsets
+
+phIter = nrow(all_ph_data);#count number of rows in bottleDataRaw
+#look up seafet pH (internal) and str temperature for each bottle, where present
+for(i in 1:phIter){
+  if ((all_ph_data$reef[i] == "Emerald") && (all_ph_data$`Datetime (EST)`[i] < as.Date("2023-03-28"))) {all_ph_data$phFinal[i]=all_ph_data$`Internal pH (pH)`[i]-offsets[4,3]}
+  else if ((all_ph_data$reef[i] == "MacNorth") && (all_ph_data$`Datetime (EST)`[i] < as.Date("2023-03-28"))) {all_ph_data$phFinal[i]=all_ph_data$`Internal pH (pH)`[i]-offsets[5,3]}
+  else if ((all_ph_data$reef[i] == "Emerald") && (all_ph_data$`Datetime (EST)`[i] < as.Date("2023-07-11"))) {all_ph_data$phFinal[i]=all_ph_data$`Internal pH (pH)`[i]-offsets[6,3]}
+  else if ((all_ph_data$reef[i] == "MacNorth") && (all_ph_data$`Datetime (EST)`[i] < as.Date("2023-07-11"))) {all_ph_data$phFinal[i]=all_ph_data$`Internal pH (pH)`[i]-offsets[7,3]}
+  else if ((all_ph_data$reef[i] == "Emerald") && (all_ph_data$`Datetime (EST)`[i] < as.Date("2023-11-20"))) {all_ph_data$phFinal[i]=all_ph_data$`Internal pH (pH)`[i]-offsets[8,3]}
+  else if ((all_ph_data$reef[i] == "MacNorth") && (all_ph_data$`Datetime (EST)`[i] < as.Date("2023-11-20"))) {all_ph_data$phFinal[i]=all_ph_data$`Internal pH (pH)`[i]-offsets[9,3]}
+  else{all_ph_data$phFinal[i]=NA}
+}
+
+all_ph_data$final_pH <- as.numeric(all_ph_data$phFinal)
+
+ggplot()+
+  geom_line(data = all_ph_data, aes(x = `Datetime (EST)`, y = final_pH,  color = reef)) +
+  geom_point(data = bottle_data, aes(x = rDateTime, y = phUsedOffset, color = reef, shape = offsetSource)) +
+  scale_shape_manual(values=c(15, 19))+
+  scale_color_manual(values=c("#D69EA0","#2A5676"))+  
+  theme_classic()+
+  theme(plot.title = element_text(size = 15))+
+  geom_line()+
+  theme(legend.position = "none")
+#ggsave("seafet_correctedwithbottlesampleoffset.pdf")
+```
+
+plot these together
+```{r}
+cowplot::plot_grid(parplot,depth_plot,pH_plot, ncol=3)
+ggsave("par_depth_pH.pdf",width=15,height=7)
+```
+
+
+
+
+# Tilt
+
+load packages
+```{r}
+library(RColorBrewer)
+library(scales)
+library(lubridate)
+library(openair)
+```
+
+```{r}
+tilt_emerald<- read_xlsx("tilt-emerald-sn2102069-redacted.xlsx", sheet = "tilt-emerald-sn2102069")
+tilt_macnorth<- read_xlsx("tilt-macnorth-sn2102068-redacted.xlsx", sheet = "tilt-macnorth-sn2102068")
+
+tilt_emerald$DateTime_EST <- with_tz(tilt_emerald$DateTime, "America/New_York")
+tilt_macnorth$DateTime_EST <- with_tz(tilt_macnorth$DateTime, "America/New_York")
+
+tilt_emerald %>% 
+  rename(ws = `Speed (cm/s)`, wd = `Heading (degrees)`) %>% 
+  filter(DateTime_EST >= as.Date("2022-12-06")) %>% 
+  mutate(reef = "Emerald") -> tilt_emerald_clean
+
+tilt_macnorth %>% 
+  rename(ws = `Speed (cm/s)`, wd = `Heading (degrees)`) %>% 
+  filter(DateTime_EST >= as.Date("2022-12-06")) %>% 
+  mutate(reef = "MacNorth") -> tilt_macnorth_clean
+
+windRose(tilt_emerald_clean, ws.int=3, max.freq = 60, cols = brewer_pal(palette="Spectral", direction=-1)(6), breaks=6, paddle=FALSE, key.header="(cm/s)", key.footer="Emerald Reef")
+ggsave("tilt_emerald.png")
+
+
+windRose(tilt_macnorth_clean, ws.int=6, max.freq = 60, cols = brewer_pal(palette="Spectral", direction=-1)(6), breaks=6, paddle=FALSE, key.header="(cm/s)", key.footer="MacArthur North")
+ggsave("tilt_macnorth.pdf")
+```
+
+
+# old data analysis 
+
+## temp
 ## calculating maximum monthly mean temperature over experiment time period for each reef
 ```{r}
 str_all %>% 
@@ -220,7 +994,6 @@ temp_data %>%
 
 
 ## Separating by season and summarizing temp data
-
 ```{r}
 temp_data %>% 
   select(!Date) %>% 
@@ -233,7 +1006,7 @@ temp_data %>%
   labs(x="Season", y = "Temp (ºC)") +
   scale_fill_manual(values = c("#edb9c3", "#5370c9")) + 
   theme_classic()
-ggsave("boxplot_temp_byseason.pdf")
+#ggsave("boxplot_temp_byseason.pdf")
 ```
 
 
@@ -250,225 +1023,6 @@ temp_data %>%
 ```
 
 
-
-
-# PAR
-
-```{r}
-ecopar_macnorth = readxl::read_xlsx("ecopar-macnorth-composite.xlsx", sheet = "ecopar-macnorth-composite")
-ecopar_emerald = readxl::read_xlsx("ecopar-emerald-composite.xlsx", sheet = "ecopar-emerald-composite")
-#10 measurements were taken instantaneously at every 30 min interval for each day.
-# PAR(avg) is the average over the 10 measurements at each interval
-
-ecopar_macnorth$`Datetime (EST)` <- with_tz(ecopar_macnorth$`Datetime (UTC)`, "America/New_York")
-ecopar_emerald$`Datetime (EST)` <- with_tz(ecopar_emerald$`Datetime (UTC)`, "America/New_York")
-
-ecopar_macnorth %>% 
-  select(!c("PAR (calc)", "Date", "Time", "Datetime (UTC)")) %>% 
-  drop_na() %>% 
-  filter(`Datetime (EST)` >= as.Date("2022-12-06")) %>% 
-  mutate(reef = "MacNorth") -> ecopar_macnorth_clean
-
-ecopar_emerald %>% 
-  select(!c("PAR (calc)", "Date", "Time", "Datetime (UTC)")) %>% 
-  drop_na() %>% 
-  filter(`Datetime (EST)` >= as.Date("2022-12-06")) %>% 
-  mutate(reef = "Emerald") -> ecopar_emerald_clean
-  
-rbind(ecopar_emerald_clean, ecopar_macnorth_clean) %>% 
-  select(`Datetime (EST)`, `PAR(avg)`, reef) %>% 
-  mutate(interval = floor_date(`Datetime (EST)`, unit = "30 minutes")) %>% 
-  mutate(hour = hour(interval), Date =as.Date(interval) ) %>% 
-  ungroup() %>% 
-  filter(hour >= 10 & hour <= 15) %>% 
-  group_by(Date, reef) %>% 
-  summarise(daily_dose = sum(`PAR(avg)`)) %>% 
-  mutate(PAR_mol_day = daily_dose/1000) %>% 
-  ggplot(., aes(x= Date , y=PAR_mol_day, color = reef)) +
-  theme_classic() +
-  geom_point() +
-  geom_line() + 
-  labs(x="Month", y = "PAR (mol/day)") +
-  scale_color_manual(values = c("#edb9c3", "#5370c9")) + 
-  theme(text = element_text(size = 15))
-#i think the PAR meter failed in July - Oct for MacNorth
-ggsave("PAR_wholetimeset.pdf")
-```
-
-```{r}
-rbind(ecopar_emerald_clean, ecopar_macnorth_clean) %>% 
-  select(`Datetime (EST)`, `PAR(avg)`, reef) %>% 
-  mutate(interval = floor_date(`Datetime (EST)`, unit = "30 minutes")) %>% 
-  mutate(hour = hour(interval), Date =as.Date(interval) ) %>% 
-  mutate(Season = case_when(Date < "2023-05-01" ~ "Dry",
-                            Date >= "2023-05-01" ~ "Wet")) %>% 
-  filter(hour >= 10 & hour <= 15) %>% 
-  group_by(Date, reef, Season) %>% 
-  summarise(daily_dose = sum(`PAR(avg)`)) %>% 
-  mutate(PAR_mol_day = daily_dose/1000) %>% 
-  ungroup() %>% 
-  group_by(reef, Season) %>% 
-  summarise(count=n(), mean_PARmolday=mean(PAR_mol_day), sd_PARmolday=sd(PAR_mol_day), min_PARmolday= min(PAR_mol_day), max_PARmolday=max(PAR_mol_day), range_PARmolday = max_PARmolday-min_PARmolday) %>% 
-  write_csv("PAR_molperday_summary.csv")
-```
-
-```{r}
-rbind(ecopar_emerald_clean, ecopar_macnorth_clean) %>% 
-  select(`Datetime (EST)`, `PAR(avg)`, reef) %>% 
-  mutate(interval = floor_date(`Datetime (EST)`, unit = "30 minutes")) %>% 
-  mutate(hour = hour(interval), Date =as.Date(interval) ) %>% 
-  mutate(Season = case_when(Date < "2023-05-01" ~ "Dry",
-                            Date >= "2023-05-01" ~ "Wet")) %>% 
-  filter(hour >= 10 & hour <= 15) %>% 
-  group_by(Date, reef, Season) %>% 
-  summarise(daily_dose = sum(`PAR(avg)`)) %>% 
-  mutate(PAR_mol_day = daily_dose/1000) %>%  
-  ggplot(., aes(x= Season , y=PAR_mol_day, fill = reef)) +
-  theme_classic() +
-  geom_boxplot() +
-  labs(x="Season", y = "PAR (mol/day)") +
-  scale_fill_manual(values = c("#edb9c3", "#5370c9")) + 
-  theme(text = element_text(size = 15))
-ggsave("PAR_boxplot_season.pdf")
-```
-
-
-# Salinity
-
-```{r}
-ctd_emerald <- read_xlsx("ctd-emerald-composite.xlsx", sheet = "ctd-emerald-composite")
-
-ctd_emerald$`Datetime (EST)` <- with_tz(ctd_emerald$`Timestamp UTC`, "America/New_York")
-
-ctd_emerald %>% 
-  select(`Datetime (EST)`, Salinity) %>% 
-  mutate(reef = "Emerald") %>% 
-  filter(`Datetime (EST)` >= as.Date("2022-12-06")) -> ctd_emerald_salinity
-
-ctd_macnorth <- read_xlsx("ctd-macnorth-composite.xlsx", sheet = "ctd-macnorth-composite")
-
-ctd_macnorth$`Datetime (EST)` <- with_tz(ctd_macnorth$`Timestamp UTC`, "America/New_York")
-
-ctd_macnorth %>% 
-  select(`Datetime (EST)`, Salinity) %>% 
-  mutate(reef = "MacNorth") %>% 
-  filter(`Datetime (EST)` >= as.Date("2022-12-06")) -> ctd_macnorth_salinity
-```
-
-
-```{r}
-rbind(ctd_emerald_salinity, ctd_macnorth_salinity) %>% 
-  mutate(Season = case_when(`Datetime (EST)` < as.Date("2023-05-01") ~ "Dry",
-                            `Datetime (EST)` >= as.Date("2023-05-01") ~ "Wet")) %>% 
-  group_by(reef, Season) %>% 
-  ggplot(., aes(x= `Datetime (EST)` , y=Salinity, color = reef)) +
-  theme_classic() +
-  geom_point() +
-  labs(x="Date", y = "Salinity") +
-  scale_color_manual(values = c("#edb9c3", "#5370c9")) + 
-  theme(text = element_text(size = 15))
-ggsave("salinity_continuous.pdf")
-
-rbind(ctd_emerald_salinity, ctd_macnorth_salinity) %>% 
-  mutate(Season = case_when(`Datetime (EST)` < as.Date("2023-05-01") ~ "Dry",
-                            `Datetime (EST)` >= as.Date("2023-05-01") ~ "Wet")) %>% 
-  group_by(reef, Season) %>% 
-  ggplot(., aes(x= Season , y=Salinity, fill = reef)) +
-  theme_classic() +
-  geom_boxplot() +
-  labs(x="Season", y = "Salinity") +
-  scale_fill_manual(values = c("#edb9c3", "#5370c9")) + 
-  theme(text = element_text(size = 15))
-ggsave("salinity_boxplot.pdf")
-```
-
-# Depth
-
-```{r}
-ctd_emerald <- read_xlsx("ctd-emerald-composite.xlsx", sheet = "ctd-emerald-composite")
-
-ctd_emerald$`Datetime (EST)` <- with_tz(ctd_emerald$`Timestamp UTC`, "America/New_York")
-
-ctd_emerald %>% 
-  select(`Datetime (EST)`, Depth) %>% 
-  mutate(reef = "Emerald") %>% 
-  filter(`Datetime (EST)` >= as.Date("2022-12-06")) -> ctd_emerald_depth
-
-ctd_macnorth <- read_xlsx("ctd-macnorth-composite.xlsx", sheet = "ctd-macnorth-composite")
-
-ctd_macnorth$`Datetime (EST)` <- with_tz(ctd_macnorth$`Timestamp UTC`, "America/New_York")
-
-ctd_macnorth %>% 
-  select(`Datetime (EST)`, Depth) %>% 
-  mutate(reef = "MacNorth") %>% 
-  filter(`Datetime (EST)` >= as.Date("2022-12-06")) -> ctd_macnorth_depth
-```
-
-```{r}
-rbind(ctd_emerald_depth, ctd_macnorth_depth) %>% 
-  mutate(Season = case_when(`Datetime (EST)` < as.Date("2023-05-01") ~ "Dry",
-                            `Datetime (EST)` >= as.Date("2023-05-01") ~ "Wet")) %>% 
-  group_by(reef, Season) %>% 
-  ggplot(., aes(x= `Datetime (EST)` , y=Depth, color = reef)) +
-  theme_classic() +
-  geom_point() +
-  labs(x="Date", y = "Depth (m)") +
-  scale_color_manual(values = c("#edb9c3", "#5370c9")) + 
-  theme(text = element_text(size = 15))
-ggsave("depth_continuous.pdf")
-
-
-rbind(ctd_emerald_depth, ctd_macnorth_depth) %>% 
-  mutate(Season = case_when(`Datetime (EST)` < as.Date("2023-05-01") ~ "Dry",
-                            `Datetime (EST)` >= as.Date("2023-05-01") ~ "Wet")) %>% 
-  group_by(reef, Season) %>% 
-  ggplot(., aes(x= Season , y=Depth, fill = reef)) +
-  theme_classic() +
-  geom_boxplot() +
-  labs(x="Season", y = "Depth (m)") +
-  scale_fill_manual(values = c("#edb9c3", "#5370c9")) + 
-  theme(text = element_text(size = 15))
-ggsave("depth_boxplot.pdf")
-```
-
-
-# Tilt
-
-load packages
-```{r}
-library(RColorBrewer)
-library(scales)
-library(lubridate)
-library(openair)
-```
-
-```{r}
-tilt_emerald<- read_xlsx("tilt-emerald-sn2102069-redacted.xlsx", sheet = "tilt-emerald-sn2102069")
-tilt_macnorth<- read_xlsx("tilt-macnorth-sn2102068-redacted.xlsx", sheet = "tilt-macnorth-sn2102068")
-
-tilt_emerald$DateTime_EST <- with_tz(tilt_emerald$DateTime, "America/New_York")
-tilt_macnorth$DateTime_EST <- with_tz(tilt_macnorth$DateTime, "America/New_York")
-
-tilt_emerald %>% 
-  rename(ws = `Speed (cm/s)`, wd = `Heading (degrees)`) %>% 
-  filter(DateTime_EST >= as.Date("2022-12-06")) %>% 
-  mutate(reef = "Emerald") -> tilt_emerald_clean
-
-tilt_macnorth %>% 
-  rename(ws = `Speed (cm/s)`, wd = `Heading (degrees)`) %>% 
-  filter(DateTime_EST >= as.Date("2022-12-06")) %>% 
-  mutate(reef = "MacNorth") -> tilt_macnorth_clean
-
-windRose(tilt_emerald_clean, ws.int=3, max.freq = 60, cols = brewer_pal(palette="Spectral", direction=-1)(6), breaks=6, paddle=FALSE, key.header="(cm/s)", key.footer="Emerald Reef")
-ggsave("tilt_emerald.png")
-
-
-windRose(tilt_macnorth_clean, ws.int=6, max.freq = 60, cols = brewer_pal(palette="Spectral", direction=-1)(6), breaks=6, paddle=FALSE, key.header="(cm/s)", key.footer="MacArthur North")
-ggsave("tilt_macnorth.pdf")
-```
-
-
-# old data analysis 
 
 ## EcoPAR
 
