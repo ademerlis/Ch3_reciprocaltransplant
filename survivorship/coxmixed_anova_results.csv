@@ -1,0 +1,9 @@
+Analysis of Deviance Table (Type III tests)
+
+Response: Surv(DaysToDeath, StatusAtEnd)
+                 Df   Chisq Pr(>Chisq)    
+Transplant        3  9.8329  0.0200412 *  
+Genet             1  6.9885  0.0082035 ** 
+Transplant:Genet  3 17.7055  0.0005059 ***
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1

@@ -1,0 +1,8 @@
+               Df Sum Sq Mean Sq F value Pr(>F)    
+reef            1  35689   35689 67286.6 <2e-16 ***
+Season          1    335     335   632.4 <2e-16 ***
+reef:Season     1    998     998  1881.0 <2e-16 ***
+Residuals   60357  32014       1                   
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+5901 observations deleted due to missingness

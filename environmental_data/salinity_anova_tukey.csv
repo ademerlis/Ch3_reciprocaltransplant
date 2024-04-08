@@ -1,0 +1,22 @@
+  Tukey multiple comparisons of means
+    95% family-wise confidence level
+
+Fit: aov(formula = salinity_sq ~ reef * Season, data = filtered_data_subset_removed)
+
+$reef
+                      diff       lwr       upr p adj
+MacNorth-Emerald -138.6425 -139.9243 -137.3608     0
+
+$Season
+             diff       lwr       upr p adj
+Wet-Dry -72.26638 -73.58848 -70.94428     0
+
+$`reef:Season`
+                                diff        lwr        upr p adj
+MacNorth:Dry-Emerald:Dry  -115.79668 -117.84444 -113.74891     0
+Emerald:Wet-Emerald:Dry    -37.86919  -40.05120  -35.68717     0
+MacNorth:Wet-Emerald:Dry  -251.90461 -254.72800 -249.08122     0
+Emerald:Wet-MacNorth:Dry    77.92749   75.63863   80.21634     0
+MacNorth:Wet-MacNorth:Dry -136.10794 -139.01468 -133.20119     0
+MacNorth:Wet-Emerald:Wet  -214.03542 -217.03826 -211.03259     0
+

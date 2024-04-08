@@ -1,0 +1,25 @@
+Cox mixed-effects model fit by maximum likelihood
+  Data: survivorship
+  events, n = 36, 72
+  Iterations= 2 18 
+                    NULL Integrated    Fitted
+Log-likelihood -143.2587  -123.2188 -123.2058
+
+                  Chisq   df          p   AIC   BIC
+Integrated loglik 40.08 8.00 3.0959e-06 24.08 11.41
+ Penalized loglik 40.11 7.01 1.2156e-06 26.08 14.98
+
+Model:  Surv(DaysToDeath, StatusAtEnd) ~ Transplant * Genet + (1 | `Coral ID`) 
+Fixed coefficients
+                                      coef    exp(coef) se(coef)     z       p
+TransplantEmerald -> MacN       -12.531608 3.610702e-06 5.821329 -2.15 0.03100
+TransplantMacN -> Emerald       -14.747714 3.936853e-07 4.824308 -3.06 0.00220
+TransplantMacN -> MacN          -13.427828 1.473562e-06 4.809857 -2.79 0.00520
+Genet                            -2.959355 5.185237e-02 1.119450 -2.64 0.00820
+TransplantEmerald -> MacN:Genet   2.861745 1.749202e+01 1.337122  2.14 0.03200
+TransplantMacN -> Emerald:Genet   4.591798 9.867171e+01 1.196123  3.84 0.00012
+TransplantMacN -> MacN:Genet      3.358096 2.873443e+01 1.183754  2.84 0.00460
+
+Random effects
+ Group    Variable  Std Dev      Variance    
+ Coral.ID Intercept 0.0199916167 0.0003996647

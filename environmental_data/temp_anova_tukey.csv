@@ -1,0 +1,22 @@
+  Tukey multiple comparisons of means
+    95% family-wise confidence level
+
+Fit: aov(formula = temp_cub ~ reef * Season, data = all_temp_data)
+
+$reef
+                     diff      lwr      upr p adj
+MacNorth-Emerald 828.6029 799.6806 857.5251     0
+
+$Season
+            diff      lwr      upr p adj
+Wet-Dry 11051.15 11021.75 11080.54     0
+
+$`reef:Season`
+                                diff        lwr        upr p adj
+MacNorth:Dry-Emerald:Dry   -165.8064  -214.6504  -116.9624     0
+Emerald:Wet-Emerald:Dry    9926.3324  9868.8349  9983.8300     0
+MacNorth:Wet-Emerald:Dry  11808.4409 11754.6781 11862.2037     0
+Emerald:Wet-MacNorth:Dry  10092.1389 10036.3501 10147.9276     0
+MacNorth:Wet-MacNorth:Dry 11974.2473 11922.3160 12026.1786     0
+MacNorth:Wet-Emerald:Wet   1882.1084  1821.9662  1942.2507     0
+

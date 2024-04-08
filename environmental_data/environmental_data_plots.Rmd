@@ -155,8 +155,8 @@ library(ncdf4)
   
   
   #MMM <- raster::extract(MMM.data, extract.pts,method="bilinear")
-  MMM_mac <- raster::extract(MMM.data, extract.pts_macn,method="simple") #29.5
-  MMM_emerald <- raster::extract(MMM.data, extract_em,method="simple") #29.5
+  MMM_mac <- raster::extract(MMM.data, extract.pts_macn,method="simple") #29.55
+  MMM_emerald <- raster::extract(MMM.data, extract_em,method="simple") #29.53
 
   #write.csv(MMM_mac, "macnorth_CRW_MMM_1985-2012.csv", row.names=FALSE)
 
@@ -164,13 +164,6 @@ library(ncdf4)
 
 ```
 
-
-add season 
-```{r}
-all_temp_data %>% 
-  mutate(Season = case_when(`Datetime (EST)` < "2023-05-01 00:00:00" ~ "Dry",
-                            `Datetime (EST)` >= "2023-05-01 00:00:00" ~ "Wet")) -> all_temp_data
-```
 
 
 ### temp summary for Site 
@@ -199,6 +192,16 @@ Daily.range %>%
 
 full_join(temp.summary, temp.d.range) %>% 
   full_join(., temp.d.30.5) -> temp_summary
+```
+
+
+
+add season 
+```{r}
+all_temp_data %>% 
+  mutate(Season = case_when(`Datetime (EST)` < "2023-05-26 00:00:00" ~ "Dry",
+                            `Datetime (EST)` >= "2023-05-26 00:00:00" & `Datetime (EST)` <= "2023-10-15 00:00:00" ~ "Wet",
+                            `Datetime (EST)` > "2023-10-15 00:00:00" ~ "Dry")) -> all_temp_data
 ```
 
 ### DHW
@@ -251,7 +254,7 @@ cbind(temp_summary, MaxDHW) %>%
 write_csv(temp_summary_DHW, "temp_DHW_summary.csv")
 ```
 
-## Radar plot
+## temperature radar plot
 ```{r}
 scale_by_max <- function(x) {
   x * 100 / max(x, na.rm = TRUE)
@@ -286,7 +289,33 @@ radarchart(temp_DHW_summary_percent, axistype=1,
 )
 ```
 
+## stats
+```{r}
+library(rstatix)
+# Ensure 'site' and 'season' are factors
+all_temp_data$reef <- as.factor(all_temp_data$reef)
+all_temp_data$Season <- as.factor(all_temp_data$Season)
 
+all_temp_data %>% 
+  mutate(temp_cub = (Temperature)^3) -> all_temp_data
+
+treat_model <- lm(temp_cub ~ reef*Season, data = all_temp_data)
+treat_model_metrics <- augment(treat_model)
+plot(treat_model) #that looks much better
+
+
+# Run the two-way ANOVA
+result <- aov(temp_cub ~ reef * Season, data = all_temp_data)
+
+
+# Display the summary of the ANOVA
+summary(result)
+
+capture.output(summary(result), file = "temp_anova.csv")
+
+TukeyHSD(aov(temp_cub ~ reef * Season, data = all_temp_data))
+capture.output(TukeyHSD(aov(temp_cub ~ reef * Season, data = all_temp_data)), file = "temp_anova_tukey.csv")
+```
 
 # PAR
 
@@ -313,13 +342,13 @@ ecopar_emerald %>%
   
 rbind(ecopar_emerald_clean, ecopar_macnorth_clean) %>% 
   dplyr::select(`Datetime (EST)`, `PAR(avg)`, reef) %>% 
-  mutate(interval = floor_date(`Datetime (EST)`, unit = "30 minutes")) %>% 
-  mutate(hour = hour(interval), Date =as.Date(interval) ) %>% 
+  dplyr::mutate(interval = floor_date(`Datetime (EST)`, unit = "30 minutes")) %>% 
+  dplyr::mutate(hour = hour(interval), Date =as.Date(interval) ) %>% 
   ungroup() %>% 
   filter(hour >= 10 & hour <= 15) %>% 
-  group_by(Date, reef) %>% 
-  summarise(daily_dose = sum(`PAR(avg)`)) %>% 
-  mutate(PAR_mol_day = daily_dose/1000) -> PAR_summary
+  dplyr::group_by(Date, reef) %>% 
+  dplyr::summarise(daily_dose = sum(`PAR(avg)`)) %>% 
+  dplyr::mutate(PAR_mol_day = daily_dose/1000) -> PAR_summary
 
  parplot<- ggplot(PAR_summary, aes(x= Date , y=PAR_mol_day, color = reef)) +
   theme_classic() +
@@ -337,8 +366,8 @@ rbind(ecopar_emerald_clean, ecopar_macnorth_clean) %>%
   select(`Datetime (EST)`, `PAR(avg)`, reef) %>% 
   mutate(interval = floor_date(`Datetime (EST)`, unit = "30 minutes")) %>% 
   mutate(hour = hour(interval), Date =as.Date(interval) ) %>% 
-  mutate(Season = case_when(Date < "2023-05-01" ~ "Dry",
-                            Date >= "2023-05-01" ~ "Wet")) %>% 
+  mutate(Season = case_when(Date < "2023-05-26" ~ "Dry",
+                            Date >= "2023-05-26" ~ "Wet")) %>% 
   filter(hour >= 10 & hour <= 15) %>% 
   group_by(Date, reef, Season) %>% 
   summarise(daily_dose = sum(`PAR(avg)`)) %>% 
@@ -366,7 +395,41 @@ rbind(ecopar_emerald_clean, ecopar_macnorth_clean) %>%
   labs(x="Season", y = "PAR (mol/day)") +
   scale_fill_manual(values = c("#edb9c3", "#5370c9")) + 
   theme(text = element_text(size = 15))
-ggsave("PAR_boxplot_season.pdf")
+#ggsave("PAR_boxplot_season.pdf")
+```
+
+## stats
+```{r}
+PAR_summary %>% 
+filter(Date <= "2023-07-11") -> PAR_summary_subset
+
+PAR_summary_subset %>% 
+  mutate(Season = case_when(Date < "2023-05-26" ~ "Dry",
+                            Date >= "2023-05-26" & Date <= "2023-10-15" ~ "Wet",
+                            Date > "2023-10-15" ~ "Dry")) -> PAR_summary_subset
+
+library(rstatix)
+# Ensure 'site' and 'season' are factors
+PAR_summary_subset$reef <- as.factor(PAR_summary_subset$reef)
+PAR_summary_subset$Season <- as.factor(PAR_summary_subset$Season)
+
+
+treat_model <- lm(PAR_mol_day ~ reef*Season, data = PAR_summary_subset)
+treat_model_metrics <- augment(treat_model)
+plot(treat_model)
+
+
+# Run the two-way ANOVA
+result <- aov(PAR_mol_day ~ reef * Season, data = PAR_summary_subset)
+
+
+# Display the summary of the ANOVA
+summary(result)
+
+capture.output(summary(result), file = "PAR_anova.csv")
+
+TukeyHSD(aov(PAR_mol_day ~ reef * Season, data = PAR_summary_subset))
+capture.output(TukeyHSD(aov(PAR_mol_day ~ reef * Season, data = PAR_summary_subset)), file = "PAR_anova_tukey.csv")
 ```
 
 
@@ -399,9 +462,6 @@ rbind(ctd_emerald_salinity, ctd_macnorth_salinity)  -> ctd_salinity
 
 ```{r}
 rbind(ctd_emerald_salinity, ctd_macnorth_salinity) %>% 
-  mutate(Season = case_when(`Datetime (EST)` < as.Date("2023-05-01") ~ "Dry",
-                            `Datetime (EST)` >= as.Date("2023-05-01") ~ "Wet")) %>% 
-  group_by(reef, Season) %>% 
   ggplot(., aes(x= `Datetime (EST)` , y=Salinity, color = reef)) +
   theme_classic() +
   geom_line() +
@@ -420,7 +480,7 @@ rbind(ctd_emerald_salinity, ctd_macnorth_salinity) %>%
   labs(x="Season", y = "Salinity") +
   scale_fill_manual(values = c("#edb9c3", "#5370c9")) + 
   theme(text = element_text(size = 15)) 
-ggsave("salinity_boxplot.pdf")
+#ggsave("salinity_boxplot.pdf")
 ```
 
 there are some definite outliers. remove those and re-plot
@@ -458,6 +518,54 @@ salinity_plot<- ggplot(filtered_data, aes(x= as.Date(Date), y=Salinity, color = 
   theme(text = element_text(size = 15)) +
   theme(legend.position = "none")
 #ggsave("salinity_continuous.pdf")
+```
+
+
+## stats
+
+```{r}
+filtered_data %>% 
+  filter(Date < "2023-04-04" | Date > "2023-07-11") -> filtered_data
+
+filtered_data %>% 
+  mutate(Season = case_when(Date < "2023-05-26" ~ "Dry",
+                            Date >= "2023-05-26" & Date <= "2023-10-15" ~ "Wet",
+                            Date > "2023-10-15" ~ "Dry")) -> filtered_data_subset
+
+library(rstatix)
+# Ensure 'site' and 'season' are factors
+filtered_data_subset$reef <- as.factor(filtered_data_subset$reef)
+filtered_data_subset$Season <- as.factor(filtered_data_subset$Season)
+
+filtered_data_subset %>% 
+  mutate(salinity_sq = (Salinity)^2) -> filtered_data_subset
+
+treat_model <- lm(salinity_sq ~ reef*Season, data = filtered_data_subset)
+treat_model_metrics <- augment(treat_model)
+plot(treat_model)
+
+treat_model_metrics %>% 
+  filter(abs(.std.resid) > 3) -> remove #126 rows to remove
+
+anti_join(filtered_data_subset, remove) -> filtered_data_subset_removed
+
+
+treat_model <- lm(salinity_sq ~ reef*Season, data = filtered_data_subset_removed)
+treat_model_metrics <- augment(treat_model)
+plot(treat_model)
+#good enough
+
+# Run the two-way ANOVA
+result <- aov(salinity_sq ~ reef * Season, data = filtered_data_subset_removed)
+
+
+# Display the summary of the ANOVA
+summary(result)
+
+capture.output(summary(result), file = "salinity_anova.csv")
+
+TukeyHSD(aov(salinity_sq ~ reef * Season, data = filtered_data_subset_removed))
+capture.output(TukeyHSD(aov(salinity_sq ~ reef * Season, data = filtered_data_subset_removed)), file = "salinity_anova_tukey.csv")
 ```
 
 
@@ -763,6 +871,8 @@ ggarrange(taTimeGraph,dicTimeGraph, ncol = 2, nrow = 1)
 #ggsave("TA_DIC_timeofday.pdf",width=10,height=7)
 ```
 
+
+
 ```{r}
 #calculate the particular seafet offset for each bottle sample
 for(i in 1:bottleIter){
@@ -781,6 +891,7 @@ for(i in 1:bottleIter){
   }
 }
 ```
+
 
 ```{r}
 pH_plot<-ggplot()+
@@ -831,10 +942,58 @@ ggplot()+
 #ggsave("seafet_correctedwithbottlesampleoffset.pdf")
 ```
 
-plot these together
+
+## stats
 ```{r}
-cowplot::plot_grid(parplot,depth_plot,pH_plot, ncol=3)
-ggsave("par_depth_pH.pdf",width=15,height=7)
+all_ph_data %>% 
+  select(reef, `Datetime (EST)`, `Internal pH (pH)`) %>% 
+  dplyr::rename(pH = `Internal pH (pH)`) -> ph_data_subset
+
+ph_data_subset %>% 
+  mutate(Season = case_when(`Datetime (EST)` < "2023-05-26 00:00:00" ~ "Dry",
+                            `Datetime (EST)` >= "2023-05-26 00:00:00" & `Datetime (EST)` <= "2023-10-15 00:00:00" ~ "Wet",
+                            `Datetime (EST)` > "2023-10-15 00:00:00" ~ "Dry")) -> ph_data_subset
+
+library(rstatix)
+# Ensure 'site' and 'season' are factors
+ph_data_subset$reef <- as.factor(ph_data_subset$reef)
+ph_data_subset$Season <- as.factor(ph_data_subset$Season)
+
+
+treat_model <- lm(pH ~ reef*Season, data = ph_data_subset)
+treat_model_metrics <- augment(treat_model)
+plot(treat_model)
+
+treat_model_metrics %>% 
+  filter(abs(.std.resid) > 3) -> remove #172 rows to remove
+
+anti_join(ph_data_subset, remove) -> ph_data_subset_removed
+
+
+treat_model <- lm(pH ~ reef*Season, data = ph_data_subset_removed)
+treat_model_metrics <- augment(treat_model)
+plot(treat_model)
+#good enough
+
+# Run the two-way ANOVA
+result <- aov(pH ~ reef * Season, data = ph_data_subset_removed)
+
+
+# Display the summary of the ANOVA
+summary(result)
+
+capture.output(summary(result), file = "pH_anova.csv")
+
+TukeyHSD(aov(pH ~ reef * Season, data = ph_data_subset_removed))
+capture.output(TukeyHSD(aov(pH ~ reef * Season, data = ph_data_subset_removed)), file = "pH_anova_tukey.csv")
+```
+
+
+
+# plot everything together
+```{r}
+cowplot::plot_grid(parplot,salinity_plot,pH_plot, ncol=3)
+ggsave("par_salinity_pH.pdf",width=15,height=7)
 ```
 
 
@@ -851,8 +1010,8 @@ library(openair)
 ```
 
 ```{r}
-tilt_emerald<- read_xlsx("tilt-emerald-sn2102069-redacted.xlsx", sheet = "tilt-emerald-sn2102069")
-tilt_macnorth<- read_xlsx("tilt-macnorth-sn2102068-redacted.xlsx", sheet = "tilt-macnorth-sn2102068")
+tilt_emerald<- read_xlsx("raw_data/tilt-emerald-sn2102069-redacted.xlsx", sheet = "tilt-emerald-sn2102069")
+tilt_macnorth<- read_xlsx("raw_data/tilt-macnorth-sn2102068-redacted.xlsx", sheet = "tilt-macnorth-sn2102068")
 
 tilt_emerald$DateTime_EST <- with_tz(tilt_emerald$DateTime, "America/New_York")
 tilt_macnorth$DateTime_EST <- with_tz(tilt_macnorth$DateTime, "America/New_York")
@@ -874,6 +1033,228 @@ ggsave("tilt_emerald.png")
 windRose(tilt_macnorth_clean, ws.int=6, max.freq = 60, cols = brewer_pal(palette="Spectral", direction=-1)(6), breaks=6, paddle=FALSE, key.header="(cm/s)", key.footer="MacArthur North")
 ggsave("tilt_macnorth.pdf")
 ```
+
+## stats
+```{r}
+rbind(tilt_emerald_clean, tilt_macnorth_clean) -> all_tilt_data
+
+all_tilt_data %>% 
+  mutate(Season = case_when(DateTime_EST < "2023-05-26 00:00:00" ~ "Dry",
+                            DateTime_EST >= "2023-05-26 00:00:00" & DateTime_EST <= "2023-10-15 00:00:00" ~ "Wet",
+                            DateTime_EST > "2023-10-15 00:00:00" ~ "Dry")) -> all_tilt_data
+
+library(rstatix)
+# Ensure 'site' and 'season' are factors
+all_tilt_data$reef <- as.factor(all_tilt_data$reef)
+all_tilt_data$Season <- as.factor(all_tilt_data$Season)
+
+
+treat_model <- lm(ws ~ reef*Season, data = all_tilt_data)
+treat_model_metrics <- augment(treat_model)
+plot(treat_model)
+
+treat_model_metrics %>% 
+  filter(abs(.std.resid) > 3) -> remove #852 rows to remove
+
+anti_join(all_tilt_data, remove) -> all_tilt_data_subset_removed
+
+
+treat_model <- lm(ws ~ reef*Season, data = all_tilt_data_subset_removed)
+treat_model_metrics <- augment(treat_model)
+plot(treat_model)
+
+
+all_tilt_data_subset_removed %>% 
+  mutate(ws_sq=sqrt(ws)) -> all_tilt_data_subset_removed
+
+treat_model <- lm(ws_sq ~ reef*Season, data = all_tilt_data_subset_removed)
+treat_model_metrics <- augment(treat_model)
+plot(treat_model)#good enough
+
+# Run the two-way ANOVA
+result <- aov(ws_sq ~ reef * Season, data = all_tilt_data_subset_removed)
+
+
+# Display the summary of the ANOVA
+summary(result)
+
+capture.output(summary(result), file = "tilt_anova.csv")
+
+TukeyHSD(aov(ws_sq ~ reef * Season, data = all_tilt_data_subset_removed))
+capture.output(TukeyHSD(aov(ws_sq ~ reef * Season, data = all_tilt_data_subset_removed)), file = "tilt_anova_tukey.csv")
+```
+
+
+
+# temp + PAR + salinity + pH + current radar plot
+
+```{r}
+temp_summary # need to make one of these for each parameter 
+```
+
+PAR
+```{r}
+#we're missing a section of data for MacNorth, so make sure the datasets have the same date ranges so the extra data for one site isn't skewing it. then in results/figure caption, state the date range for each
+
+rbind(ecopar_emerald_clean, ecopar_macnorth_clean) %>% 
+  dplyr::select(`Datetime (EST)`, `PAR(avg)`, reef) %>% 
+  mutate(interval = floor_date(`Datetime (EST)`, unit = "30 minutes")) %>% 
+  mutate(hour = hour(interval), Date =as.Date(interval) ) %>% 
+  ungroup() %>% 
+  filter(hour >= 7 & hour <= 18) %>% 
+  dplyr::rename(PAR_daytime=`PAR(avg)`) -> daytime_par_continuous # approx sunrise to sunset
+
+daytime_par_continuous %>% 
+  select(Date, reef) %>% 
+  distinct() # MAcNorth data ends 2023-07-11
+
+daytime_par_continuous %>% 
+  filter(Date <= "2023-07-11") -> daytime_par_continuous
+
+par.summary <- summaryBy(PAR_daytime ~ reef, data = daytime_par_continuous,
+                         FUN = function(x) { c(max = max(x), min = min(x)) } )
+
+par.summary$par.seasonal <- par.summary$PAR_daytime.max - par.summary$PAR_daytime.min
+
+# Daily Range
+Daily.range <- summaryBy(PAR_daytime ~ Date + reef, data=daytime_par_continuous, FUN=c(max,min,mean,sd))
+
+Daily.range$par.daily.range <- Daily.range$PAR_daytime.max - Daily.range$PAR_daytime.min
+
+par.d.range <- summaryBy(par.daily.range ~ reef, data = Daily.range,
+                          FUN = function(x) { c(mean = mean(x)) } )
+
+full_join(par.summary, par.d.range) -> par_summary
+```
+
+salinity
+```{r}
+#we're missing a section of data for MacNorth, so make sure the datasets have the same date ranges so the extra data for one site isn't skewing it. then in results/figure caption, state the date range for each
+
+filtered_data %>% 
+  select(Date, reef) %>% 
+  distinct() # 2023-04-04 -- 2023-07-11 there is no MacN data
+
+filtered_data %>% 
+  filter(Date < "2023-04-04" | Date > "2023-07-11") -> filtered_data
+
+salinity.summary <- summaryBy(Salinity ~ reef, data = filtered_data,
+                         FUN = function(x) { c(max = max(x), min = min(x)) } )
+
+salinity.summary$salinity.seasonal <- salinity.summary$Salinity.max - salinity.summary$Salinity.min
+
+# Daily Range
+Daily.range <- summaryBy(Salinity ~ Date + reef, data=filtered_data, FUN=c(max,min,mean,sd))
+
+Daily.range$salinity.daily.range <- Daily.range$Salinity.max - Daily.range$Salinity.min
+
+salinity.d.range <- summaryBy(salinity.daily.range ~ reef, data = Daily.range,
+                          FUN = function(x) { c(mean = mean(x)) } )
+
+full_join(salinity.summary, salinity.d.range) -> salinity_summary
+```
+
+pH (using raw internal pH because corrections with bottle samples were really off)
+```{r}
+all_ph_data %>% 
+  dplyr::select(`Internal pH (pH)`, `Datetime (EST)`, reef) %>% 
+  dplyr::rename(pH=`Internal pH (pH)`) %>% 
+  separate(`Datetime (EST)`, into = c("Date", "Time"), sep = " ") -> ph_data
+
+pH.summary <- summaryBy(pH ~ reef, data = ph_data,
+                         FUN = function(x) { c(max = max(x), min = min(x)) } )
+
+pH.summary$pH.seasonal <- pH.summary$pH.max - pH.summary$pH.min
+
+# Daily Range
+Daily.range <- summaryBy(pH ~ Date + reef, data=ph_data, FUN=c(max,min,mean,sd))
+
+Daily.range$pH.daily.range <- Daily.range$pH.max - Daily.range$pH.min
+
+pH.d.range <- summaryBy(pH.daily.range ~ reef, data = Daily.range,
+                          FUN = function(x) { c(mean = mean(x)) } )
+
+full_join(pH.summary, pH.d.range) -> pH_summary
+```
+
+current
+```{r}
+rbind(tilt_emerald_clean, tilt_macnorth_clean) %>% 
+  dplyr::select(Date, ws, reef) %>% 
+  drop_na(ws) -> tilt_data
+
+tilt.summary <- summaryBy(ws ~ reef, data = tilt_data,
+                         FUN = function(x) { c(max = max(x), min = min(x)) } )
+
+tilt.summary$tilt.seasonal <- tilt.summary$ws.max - tilt.summary$ws.min
+
+# Daily Range
+Daily.range <- summaryBy(ws ~ Date + reef, data=tilt_data, FUN=c(max,min,mean,sd))
+
+Daily.range$tilt.daily.range <- Daily.range$ws.max - Daily.range$ws.min
+
+tilt.d.range <- summaryBy(tilt.daily.range ~ reef, data = Daily.range,
+                          FUN = function(x) { c(mean = mean(x)) } )
+
+full_join(tilt.summary, tilt.d.range) -> tilt_summary
+```
+
+## radar plot
+```{r}
+cbind(temp_summary_DHW, par_summary, salinity_summary, pH_summary, tilt_summary) %>% 
+  column_to_rownames(var="reef") %>% 
+  select(!reef) -> all_data
+
+#write_csv(all_data, "radarplot_alldata.csv")
+```
+
+```{r}
+scale_by_max <- function(x) {
+  x * 100 / max(x, na.rm = TRUE)
+}
+
+ all_data %>%
+  dplyr::mutate(across(everything(), as.numeric)) %>%
+  dplyr::mutate(across(everything(), scale_by_max)) -> all_data_percent
+
+# To use the fmsb package, I have to add 2 lines to the dataframe: the max and min of each variable to show on the plot!
+all_data_percent <- rbind(rep(100,5), rep(0,5), all_data_percent)
+
+# Color vector
+colors_border=c("#edb9c3", "#5370c9")
+colors_in=c("#edb9c3", "#5370c9")
+
+# Define colors with transparency using adjustcolor
+colors_border <- c(adjustcolor("#edb9c3", alpha = 0.9), adjustcolor("#5370c9", alpha = 0.9))
+colors_in <- c(adjustcolor("#edb9c3", alpha = 0.4), adjustcolor("#5370c9", alpha = 0.4))
+
+library(fmsb)
+# plot with default options:
+#pdf("radarchart_withDHW.pdf")
+radarchart(all_data_percent, axistype=1, 
+            #custom polygon
+            pcol=colors_border , pfcol=colors_in , plwd=4 , plty=1,
+            #custom the grid
+            cglcol="grey", cglty=1, axislabcol="grey", caxislabels=seq(0,100,25), cglwd=0.8,
+            #custom labels
+            vlcex=0.9
+)
+#this is very chaotic so let's take only the most interesting from each parameter
+
+all_data_percent %>% 
+  select(!ws.min) -> data_percent_subset
+
+#pdf("radarchart_allenvdata.pdf")
+radarchart(data_percent_subset, axistype=1, 
+            #custom polygon
+            pcol=colors_border , pfcol=colors_in , plwd=4 , plty=1,
+            #custom the grid
+            cglcol="grey", cglty=1, axislabcol="grey", caxislabels=seq(0,100,25), cglwd=0.8,
+            #custom labels
+            vlcex=0.9
+)
+```
+
 
 
 # old data analysis 

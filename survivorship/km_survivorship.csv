@@ -1,0 +1,26 @@
+Call: survfit(formula = Surv(DaysToDeath, StatusAtEnd) ~ Transplant, 
+    data = survivorship)
+
+                Transplant=Emerald -> Emerald 
+ time n.risk n.event survival std.err lower 95% CI upper 95% CI
+   51     18       4    0.778   0.098        0.608        0.996
+  217     14       1    0.722   0.106        0.542        0.962
+
+                Transplant=Emerald -> MacN 
+ time n.risk n.event survival std.err lower 95% CI upper 95% CI
+  119     18       3    0.833  0.0878        0.678        1.000
+  217     15       1    0.778  0.0980        0.608        0.996
+  350     14       4    0.556  0.1171        0.368        0.840
+
+                Transplant=MacN -> Emerald 
+ time n.risk n.event survival std.err lower 95% CI upper 95% CI
+   51     18      12    0.333   0.111        0.173        0.641
+  350      6       1    0.278   0.106        0.132        0.585
+
+                Transplant=MacN -> MacN 
+ time n.risk n.event survival std.err lower 95% CI upper 95% CI
+   51     18       1    0.944   0.054        0.844        1.000
+  119     17       3    0.778   0.098        0.608        0.996
+  217     14       5    0.500   0.118        0.315        0.794
+  350      9       1    0.444   0.117        0.265        0.745
+
