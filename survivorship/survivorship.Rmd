@@ -16,9 +16,12 @@ library(ggsurvfit)
 library(gtsummary)
 library(car)
 library(ggplot2)
+library(multcomp)
 
 survivorship <- readxl::read_xlsx("survivorship_data.xlsx", sheet = "kaplan meier data")
 survivorship$Genet <- as.factor(survivorship$Genet)
+
+survivorship_data <- readxl::read_xlsx("survivorship_data.xlsx", sheet = "color coded - corrected")
 ```
 # Definitions 
 
@@ -50,18 +53,6 @@ survivorship %>%
 ```
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 # Proportion survived bleaching
 
 ```{r}
@@ -86,6 +77,22 @@ survivorship_data %>%
   summarise(sum = sum(Day_350)) # number dead on day 350 = 36
 
 #30/36 = 0.83333
+
+survivorship_data %>% 
+  select(Genet:Transplant,Day_217,Day_350) %>% 
+  filter(Day_217 == "alive") %>% 
+  group_by(Transplant, Day_350) %>% 
+  summarise(count = n()) %>% 
+  pivot_wider(names_from="Day_350", values_from="count") %>% 
+  mutate(across(everything(), ~replace(., is.na(.), 0))) %>% 
+  mutate(prop_surv=1-(dead/alive), prop_dead=dead/alive) %>% 
+  pivot_longer(prop_surv:prop_dead, names_to="prop") %>% 
+  ggplot(., aes(x=Transplant, y=value, fill=prop)) +
+  geom_bar(stat="identity", color="black") +
+  theme_classic() +
+  scale_fill_manual(values = c("prop_dead" = "black", "prop_surv" = "lightgrey")) +
+  ylab("Proportion")
+#ggsave("proportion_survived_bleaching.pdf")
 ```
 
 
@@ -144,6 +151,24 @@ survfit2(Surv(DaysToDeath, StatusAtEnd) ~ Transplant, data = subset) %>%
   theme(text = element_text(size = 15)) +
   theme(legend.position = "right") 
 ```
+
+tukey posthoc using multcomp
+```{r}
+survfit2(Surv(DaysToDeath, StatusAtEnd) ~ Transplant, data = survivorship) 
+
+# Fit Cox Proportional Hazards Model
+cox_model <- coxph(Surv(DaysToDeath, StatusAtEnd) ~ Transplant, data = survivorship)
+
+# Perform ANOVA on Cox Model
+anova_result <- anova(cox_model)
+
+# Perform Tukey Post Hoc Test
+tukey_result <- glht(cox_model, linfct = mcp(Transplant = "Tukey"))
+summary(tukey_result)
+
+```
+
+
 
 following https://github.com/rachaelbay/Acropora-hyacinthus-transplant-experiment/blob/master/FitnessStats.R
 ```{r}

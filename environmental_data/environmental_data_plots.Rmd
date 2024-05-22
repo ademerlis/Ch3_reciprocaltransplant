@@ -128,6 +128,53 @@ labs( x="Month") +
 #ggsave("temperatureplot_withMMM.png")
 ```
 
+get max daily temp experienced for time points of coral monitoring
+```{r}
+#december 6 (initial)
+#jan 26 (t1)
+#april 4 (t2)
+#july 11 (t3)
+#nov 20 (t4)
+
+str_all %>% 
+  filter(`Datetime (EST)` >= "2022-12-05 23:00:00" & `Datetime (EST)` <= "2022-12-06 23:00:00") %>% 
+  group_by(reef) %>% 
+  summarise(max_temp = max(Temperature))
+#Emerald = 26.9
+#MacNorth = 25.6
+
+str_all %>% 
+  filter(`Datetime (EST)` >= "2023-01-25 23:00:00" & `Datetime (EST)` <= "2023-01-26 23:00:00") %>% 
+  group_by(reef) %>% 
+  summarise(max_temp = max(Temperature))
+#Emerald = 25.6
+#MacNorth = 25.0
+
+str_all %>% 
+  filter(`Datetime (EST)` >= "2023-04-03 23:00:00" & `Datetime (EST)` <= "2023-04-04 23:00:00") %>% 
+  group_by(reef) %>% 
+  summarise(max_temp = max(Temperature))
+#Emerald = 26.8
+#MacNorth = 28.3
+
+str_all %>% 
+  filter(`Datetime (EST)` >= "2023-07-10 23:00:00" & `Datetime (EST)` <= "2023-07-11 23:00:00") %>% 
+  group_by(reef) %>% 
+  summarise(max_temp = max(Temperature))
+#Emerald = 31.4
+#MacNorth = 32.8
+
+str_all %>% 
+  filter(Date >= "2022-12-06") %>% 
+  full_join(ctd_emerald_temp_sept9) %>% 
+    filter(Date >= "2023-11-19" & Date <= "2023-11-20") %>% 
+  group_by(reef) %>% 
+  summarise(max_temp = max(Temperature))
+#Emerald = 27.0
+#MacNorth = 26.3
+```
+
+
 ## temp summary
 
 ### get MMM from CRW
@@ -350,6 +397,10 @@ rbind(ecopar_emerald_clean, ecopar_macnorth_clean) %>%
   dplyr::summarise(daily_dose = sum(`PAR(avg)`)) %>% 
   dplyr::mutate(PAR_mol_day = daily_dose/1000) -> PAR_summary
 
+PAR_summary %>% 
+  group_by(reef) %>% 
+  summarise(mean_PAR_day = mean(PAR_mol_day))
+
  parplot<- ggplot(PAR_summary, aes(x= Date , y=PAR_mol_day, color = reef)) +
   theme_classic() +
   geom_line() + 
@@ -520,6 +571,90 @@ salinity_plot<- ggplot(filtered_data, aes(x= as.Date(Date), y=Salinity, color = 
 #ggsave("salinity_continuous.pdf")
 ```
 
+import bottle sample data and look at that to compare to in-situ (it looks like there is drift happening over time)
+```{r}
+filtered_data %>% 
+  select(Date:reef) %>% 
+  mutate(type = "sensor") -> salinity_data_subset
+
+bottlesampledata <- read_csv("raw_data/bottle-data.csv")
+
+bottlesampledata %>% 
+  select(collected_date, collected_time, collected_site, calc_salinity) %>% 
+  rename(Date = collected_date, Salinity = calc_salinity, reef = collected_site, Time = collected_time) %>% 
+  mutate(Date = mdy(Date)) %>% 
+  mutate(Date = as.character(Date)) %>% 
+  mutate(Time = as.character(Time)) %>% 
+  mutate(reef = case_when(reef == "Emerald Reef" ~ "Emerald", 
+                          reef == "MacArthur Causeway North" ~ "MacNorth", 
+                          reef == "MacArthur Cswy North" ~ "MacNorth", 
+                          reef == "Mac North" ~ "MacNorth",
+                          reef == "Emerald Ree" ~ "Emerald")) %>% 
+  mutate(type = "bottle") %>% 
+  full_join(., salinity_data_subset) %>% 
+  group_by(reef, Date, type) %>% 
+  mutate(mean_daily_salinity = mean(Salinity)) %>% 
+  ggplot(., aes(x=Date, y=Salinity, color = type)) +
+  facet_wrap(~reef) +
+  geom_point(aes(alpha = type == "sensor")) +  # Adjust alpha based on group
+  scale_alpha_manual(values = c(1, 0.3)) 
+  
+```
+
+```{r}
+filtered_data %>% 
+  filter(Date < "2023-04-04" | Date > "2023-07-11") %>% 
+  ggplot(., aes(x= as.Date(Date), y=Salinity, color = reef)) +
+  theme_classic() +
+  geom_point() +
+  labs(x="Date", y = "Salinity") +
+  scale_color_manual(values = c("#edb9c3", "#5370c9")) + 
+  theme(text = element_text(size = 15)) +
+  theme(legend.position = "none")
+```
+
+```{r}
+filtered_data %>% 
+  group_by(reef, Date) %>% 
+  mutate(mean_daily_salinity = mean(Salinity), sd_daily_salinity = sd(Salinity)) %>% 
+  filter(Date < "2023-04-04" | Date > "2023-07-11") %>% 
+  ggplot(., aes(x= as.Date(Date), y=mean_daily_salinity, color = reef)) +
+  theme_classic() +
+  geom_point() +
+  geom_errorbar(aes(ymin = mean_daily_salinity - sd_daily_salinity, ymax = mean_daily_salinity + sd_daily_salinity), width = 0.2, alpha = 0.1) +
+  labs(x="Date", y = "Salinity") +
+  scale_color_manual(values = c("#edb9c3", "#5370c9")) + 
+  theme(text = element_text(size = 15))
+```
+
+```{r}
+filtered_data %>% 
+  group_by(reef, Date) %>% 
+  mutate(mean_daily_salinity = mean(Salinity), sd_daily_salinity = sd(Salinity)) %>% 
+  filter(Date < "2023-04-04" | Date > "2023-07-11") %>% 
+  ggplot(., aes(x= reef, y=mean_daily_salinity, fill = reef)) +
+  theme_classic() +
+  geom_boxplot() +
+  labs(x="Reef", y = "Salinity") +
+  scale_fill_manual(values = c("#edb9c3", "#5370c9")) + 
+  theme(text = element_text(size = 15))
+```
+
+```{r}
+filtered_data %>% 
+  group_by(reef, Date) %>% 
+  mutate(mean_daily_salinity = mean(Salinity), sd_daily_salinity = sd(Salinity)) %>% 
+  filter(Date < "2023-04-04" | Date > "2023-07-11") -> salinity_subset
+
+salinity_subset %>% 
+  select(Date, reef, mean_daily_salinity) %>% 
+  distinct() %>% 
+  pivot_wider(names_from="reef", values_from = "mean_daily_salinity")-> mean_daily_salinity
+
+wilcox.test(mean_daily_salinity$Emerald, mean_daily_salinity$MacNorth, alternative = "two.sided")
+
+```
+
 
 ## stats
 
@@ -657,6 +792,58 @@ phDataRaw_macnorth %>%
 
 rbind(pH_emerald, pH_macnorth) -> all_ph_data
 ```
+
+boxplot of raw pH sensor data
+```{r}
+pH_emerald %>% 
+  select(`Datetime (EST)`, reef, `Internal pH (pH)`) %>% 
+  rename(DateTime = `Datetime (EST)`) %>% 
+  mutate(Date = as.Date(DateTime)) %>% 
+  filter(`Internal pH (pH)` < 8.049 & `Internal pH (pH)` > 7.895) -> pH_emerald_subset
+
+pH_macnorth %>% 
+  select(`Datetime (EST)`, reef, `Internal pH (pH)`) %>% 
+  rename(DateTime = `Datetime (EST)`) %>% 
+  mutate(Date = as.Date(DateTime)) %>%
+  filter(`Internal pH (pH)` < 8.142 & `Internal pH (pH)` > 7.619) -> ph_macnorth_subset
+
+rbind(pH_emerald_subset, ph_macnorth_subset) -> all_ph_data_subset
+
+
+all_ph_data_subset %>% 
+  group_by(Date, reef) %>% 
+  mutate(mean_daily_ph=mean(`Internal pH (pH)`)) %>% 
+  select(!c(DateTime, `Internal pH (pH)`)) %>% 
+  distinct() %>% 
+  ggplot(., aes(x=reef, y=mean_daily_ph, fill=reef)) +
+  geom_boxplot() +
+  theme_classic() +
+  scale_fill_manual(values = c("#edb9c3", "#5370c9")) + 
+  theme(text = element_text(size = 15)) +
+  labs(y="pH", x="Reef")
+
+#set max and mins based on Enochs et al 2023
+#emerald range: 7.895 - 8.049
+#macnorth range: 7.619 - 8.142
+```
+
+```{r}
+all_ph_data_subset %>% 
+  group_by(Date, reef) %>% 
+  mutate(mean_daily_ph=mean(`Internal pH (pH)`)) %>% 
+  select(!c(DateTime, `Internal pH (pH)`)) %>% 
+  distinct() -> mean_daily_ph
+
+treat_model <- lm(mean_daily_ph ~ reef, data = mean_daily_ph)
+plot(treat_model) # not normal
+
+mean_daily_ph %>% 
+  pivot_wider(names_from="reef", values_from = "mean_daily_ph")-> mean_daily_ph
+
+wilcox.test(mean_daily_ph$Emerald, mean_daily_ph$MacNorth, alternative = "two.sided")
+
+```
+
 
 round temperature data 
 ```{r}

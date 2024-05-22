@@ -1,0 +1,417 @@
+---
+title: "pH"
+author: "allyson_demerlis"
+date: "2024-04-22"
+output: html_document
+---
+
+## import STR files
+```{r}
+str_emerald <- read_excel("raw_data/str-emerald-sn5042.xlsx", sheet = "str-emerald-sn5042")
+
+str_emerald$`Datetime (UTC)` <- as.POSIXct(str_emerald$`Datetime (UTC)`, tz="UTC")
+str_emerald$`Datetime (EST)` <- with_tz(str_emerald$`Datetime (UTC)`, "America/New_York")
+
+str_emerald %>% 
+  mutate(reef = "Emerald") %>% 
+  dplyr::select(!Time) %>% 
+  dplyr::select(!`Datetime (UTC)`) %>% 
+  dplyr::select(!`Sample Number`) -> str_emerald
+  
+str_macnorth <- read_excel("raw_data/str-macnorth-sn9235.xlsx", sheet = "str-macnorth-sn9235")
+
+str_macnorth$Datetime <- as.POSIXct(str_macnorth$Datetime, tz="UTC")
+str_macnorth$`Datetime (EST)` <- with_tz(str_macnorth$Datetime, "America/New_York")
+
+str_macnorth %>% 
+  mutate(reef = "MacNorth") %>% 
+  dplyr::select(!Datetime) %>% 
+  dplyr::select(!`Sample Number`) %>% 
+  dplyr::select(!Time) -> str_macnorth
+
+full_join(str_emerald, str_macnorth) -> str_all
+
+ctd_emerald <- read_excel("raw_data/ctd-emerald-composite.xlsx", sheet = "ctd-emerald-composite")
+
+ctd_emerald %>% 
+  dplyr::select(`Timestamp UTC`, Temperature) -> ctd_emerald_temp
+
+ctd_emerald_temp$`Timestamp (UTC)` <- as.POSIXct(ctd_emerald_temp$`Timestamp UTC`, tz="UTC")
+ctd_emerald_temp$`Datetime (EST)` <- with_tz(ctd_emerald_temp$`Timestamp (UTC)`, "America/New_York")
+
+ctd_emerald_temp %>%
+  mutate(Datetime_EST = `Datetime (EST)`) %>% 
+  separate(Datetime_EST, into = c("Date", "Time"), sep = " ") %>% 
+  mutate(Date = ymd(Date)) %>% 
+  dplyr::select(-1,-3) %>% 
+  mutate(reef = "Emerald") %>% 
+  filter(Date >= "2023-09-09") -> ctd_emerald_temp_sept9
+```
+
+# pH
+
+```{r}
+library(openair)
+library(seacarb)
+library(tidyverse)
+library(readxl)
+```
+
+import seafet data
+```{r}
+phDataRaw_emerald <- read_excel("raw_data/seafet-emerald-composite.xlsx", sheet = "seafet-emerald-composite")
+
+phDataRaw_emerald$`Datetime (EST)` <- with_tz(phDataRaw_emerald$`DateTime (UTC+00:00)`, "America/New_York")
+
+phDataRaw_emerald %>% 
+  mutate(reef = "Emerald") %>% 
+  select(!Swap) -> pH_emerald
+
+
+phDataRaw_macnorth <- read_excel("raw_data/seafet-macnorth-composite.xlsx", sheet = "seafet-macnorth-composite")
+
+phDataRaw_macnorth$`Datetime (EST)` <- with_tz(phDataRaw_macnorth$`DateTime (UTC+00:00)`, "America/New_York")
+
+phDataRaw_macnorth %>% 
+  mutate(reef = "MacNorth") -> pH_macnorth
+
+rbind(pH_emerald, pH_macnorth) -> all_ph_data
+```
+
+round temperature data 
+```{r}
+str_macnorth$dateTimeEST5Rounded <- round_date(str_macnorth$`Datetime (EST)`, "5 minutes")
+
+str_all %>% 
+  full_join(ctd_emerald_temp_sept9) %>% 
+  filter(reef=="Emerald") %>% 
+  select(!Time) ->emerald_temp_data
+
+emerald_temp_data$dateTimeEST5Rounded <- round_date(emerald_temp_data$`Datetime (EST)`, "5 minutes")
+```
+
+
+import bottle sample data
+```{r}
+bottle_data<-read_csv("raw_data/bottle-data.csv")
+
+bottle_data$Date <- mdy(bottle_data$collected_date)
+bottle_data$Time <- hms(bottle_data$collected_time)
+bottle_data$rDateTime <-paste(bottle_data$Date, bottle_data$Time, sep = " ")
+bottle_data$rDateTime <- ymd_hms(bottle_data$rDateTime)
+bottle_data$rDateTime30Rounded <- round_date(bottle_data$rDateTime, "30 minutes")
+bottle_data$dateTimeEST5Rounded <- round_date(bottle_data$rDateTime, "5 minutes")
+
+bottle_data %>% 
+  mutate(reef = case_when(collected_site == "Emerald Reef" ~ "Emerald",
+                          collected_site == "Emerald Ree" ~ "Emerald",
+                          collected_site == "MacArthur Cswy North" ~ "MacNorth",
+                          collected_site == "MacArthur Causeway North" ~ "MacNorth",
+                          collected_site == "Mac North" ~ "MacNorth")) -> bottle_data
+
+bottleIter = nrow(bottle_data);#count number of rows in bottleDataRaw
+#look up seafet pH (internal) and str temperature for each bottle, where present
+for(i in 1:bottleIter){
+    if (bottle_data$reef[i] == "Emerald") {#determine site
+    phLookupLine = match(bottle_data$rDateTime30Rounded[i], pH_emerald$`Datetime (EST)`)#identify seafet row number for that site and time
+    bottle_data$phInt[i] = pH_emerald$`Internal pH (pH)`[phLookupLine]#grab the pH from that line and put it into the bottle data table
+    tempLookupLine = match(bottle_data$dateTimeEST5Rounded[i], str_emerald$dateTimeEST5Rounded)#identify the str row number for that site and time
+    bottle_data$tempSTR[i] = emerald_temp_data$Temperature[tempLookupLine]#grab the str temperature from that line and put it into the bottle data table
+  }
+   else if (bottle_data$reef[i] == "MacNorth") {#determine site
+    phLookupLine = match(bottle_data$rDateTime30Rounded[i], pH_macnorth$`Datetime (EST)`)#identify seafet row number for that site and time
+    bottle_data$phInt[i] = pH_macnorth$`Internal pH (pH)`[phLookupLine]#grab the pH from that line and put it into the bottle data table
+    tempLookupLine = match(bottle_data$dateTimeEST5Rounded[i], str_macnorth$dateTimeEST5Rounded)#identify the str row number for that site and time
+    bottle_data$tempSTR[i] = str_macnorth$Temperature[tempLookupLine]#grab the str temperature from that line and put it into the bottle data table
+   }
+}
+```
+
+
+```{r}
+#look at temp data comparison
+bottle_data %>% 
+  dplyr::select(collected_temp,rDateTime, reef, tempSTR) %>% 
+  pivot_longer(c(collected_temp, tempSTR),names_to="temp_measure", values_to="temp_value") %>% 
+  ggplot(., aes(x=rDateTime, y=temp_value, color=temp_measure)) +
+  facet_wrap(~reef) +
+  geom_point()
+
+bottle_data %>% 
+  dplyr::select(pH_measured,pH_calculated,rDateTime, reef, phInt) %>% 
+  pivot_longer(c(pH_measured,pH_calculated,phInt),names_to="pH_measure", values_to="pH_value") %>% 
+  ggplot(., aes(x=rDateTime, y=pH_value, color=pH_measure)) +
+  facet_wrap(~reef) +
+  geom_point()
+#ggsave("bottlesamples_vs_seafet.pdf")
+#definitely some differences between bottle samples and seafet measurements
+```
+
+```{r}
+for(i in 1:bottleIter){
+  if(is.na(bottle_data$collected_temp[i])){output = NA} #if tempSTR is absent, set output to NA
+  else { 
+    output = carb(flag=15, var1=bottle_data$TA_umol_kg[i]/1000000, var2=bottle_data$DIC_umol_kg[i]/1000000, S=bottle_data$calc_salinity[i],T=bottle_data$collected_temp[i], P=bottle_data$collected_depth[i], k1k2 = "l", kf = "pf", ks = "d", pHscale = "T")
+    bottle_data$phCalc[i] = output[6]
+  #calculates dic from pH and 
+    outputDic = carb(flag=8, var1=bottle_data$pH_measured[i], var2=bottle_data$TA_umol_kg[i]/1000000,  S=bottle_data$calc_salinity[i],T=bottle_data$collected_temp[i], P=bottle_data$collected_depth[i], k1k2 = "l", kf = "pf", ks = "d", pHscale = "T")
+    bottle_data$dicCalc[i] = outputDic[16]
+    bottle_data$dicCalc[i] = as.numeric(bottle_data$dicCalc[i])
+    bottle_data$pco2[i] = outputDic[13]
+    bottle_data$omegaArag[i] = outputDic[18]
+    }
+}
+```
+
+
+
+```{r}
+bottle_data
+#create dic check
+bottle_data$dicCalc<-(as.numeric(bottle_data$dicCalc)*1000000)
+bottle_data$dicDiff = (bottle_data$DIC_umol_kg-bottle_data$dicCalc)
+#make graphs for salinity normalization of TA and DIC
+
+taEndPointGraph <- ggplot(bottle_data, aes(x = calc_salinity, y = TA_umol_kg)) +
+  theme_light()+
+  geom_point(aes(color = reef), size = 3)+
+  scale_color_manual(values=c("#D69EA0","#2A5676"))+  
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  geom_smooth(method = 'lm', formula = y~x)+
+  stat_cor(label.x = 31, label.y = 2480) +
+  stat_regline_equation(label.x = 31, label.y = 2500)
+dicEndPointGraph <- ggplot(bottle_data, aes(x = calc_salinity, y = dicCalc)) +
+  theme_light()+
+  geom_point(aes(color = reef), size = 3)+
+  scale_color_manual(values=c("#D69EA0","#2A5676"))+  
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  geom_smooth(method = 'lm', formula = y~x)+
+  stat_cor(label.x = 31, label.y = 2380) +
+  stat_regline_equation(label.x = 31, label.y = 2400)
+taDicPointGraph <- ggplot(bottle_data, aes(x = TA_umol_kg, y = DIC_umol_kg)) +
+  theme_light()+
+  geom_point(aes(color = reef), size = 3)+
+  scale_color_manual(values=c("#D69EA0","#2A5676"))+  
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  geom_smooth(method = 'lm', formula = y~x)+
+  stat_cor(label.x = 2300, label.y = 2380) +
+  stat_regline_equation(label.x = 2300, label.y = 2400)
+taDicCalcPointGraph <- ggplot(bottle_data, aes(x = TA_umol_kg, y = dicCalc)) +
+  theme_light()+
+  geom_point(aes(color = reef), size = 3)+
+  scale_color_manual(values=c("#D69EA0","#2A5676"))+  
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  geom_smooth(method = 'lm', formula = y~x)+
+  stat_cor(label.x = 2300, label.y = 2380) +
+  stat_regline_equation(label.x = 2300, label.y = 2400)
+dicDiffTimeGraph <- ggplot(bottle_data, aes(x = rDateTime, y = dicDiff)) +
+  theme_light()+
+  geom_point(aes(color = reef), size = 3)+
+  scale_color_manual(values=c("#D69EA0","#2A5676"))+  
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+#dic Issues Graph
+ggarrange(taDicPointGraph, taDicCalcPointGraph, dicDiffTimeGraph, ncol = 3, nrow = 1)
+ggarrange(taEndPointGraph,dicEndPointGraph, ncol = 2, nrow = 1)
+#proceed with Friss salinity normalization from end point graph equations
+taEndMember = 2200
+dicEndMember = 3300
+bottle_data$ta35Friss = 35*((bottle_data$TA_umol_kg-taEndMember)/bottle_data$calc_salinity)+taEndMember
+bottle_data$dic35Friss = 35*((bottle_data$dicCalc-dicEndMember)/bottle_data$calc_salinity)+dicEndMember
+#graph TA vs DIC
+taDicFrissPointGraph <- ggplot(bottle_data, aes(x = dic35Friss, y = ta35Friss)) +
+  theme_light()+
+  geom_point(aes(color = reef), size = 3)+
+  scale_color_manual(values=c("#D69EA0","#2A5676"))+  
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  geom_smooth(method = 'lm', formula = y~x)+
+  stat_cor(label.x = 2000, label.y = 2500) +
+  stat_regline_equation(label.x = 2000, label.y = 2520)
+#create ta dic graph
+taDicFrissPointGraph
+#create ta and dc vs salinity graphs
+ggarrange(taEndPointGraph,dicEndPointGraph, taDicFrissPointGraph,ncol = 3, nrow = 1)
+#ggsave("TA_DIC_diagnosticgraphs.pdf", width = 10, height=7)
+```
+
+
+```{r}
+library(plyr)
+library(dplyr)
+
+#create bottle tables for all samples
+bottle_data$pco2<-as.numeric(bottle_data$pco2)
+bottle_data$omegaArag<-as.numeric(bottle_data$omegaArag)
+
+#add season
+numbRows = nrow(bottle_data)
+for(i in 1:numbRows){
+  if (bottle_data$rDateTime[i]>"2023-5-26" && bottle_data$rDateTime[i]<"2023-10-15"){bottle_data$precipitation[i] = "wet"}
+  else if (bottle_data$rDateTime[i]>"2022-5-26" && bottle_data$rDateTime[i]<"2022-10-15"){bottle_data$precipitation[i] = "wet"}
+  else {bottle_data$precipitation[i] = "dry"}
+}
+
+
+bottleSummary <- ddply(bottle_data, c("reef","precipitation"), summarise,
+                             countSalinityDensitometer = length(dicCalc),
+                             meanSalinityDensitometer = round(mean(calc_salinity),2),
+                             sdSalinityDensitometer   = round(sd(calc_salinity),2),
+                             meanSpecPhField = round(mean(pH_measured, na.rm=TRUE),3),
+                             sdSpecPhField   = round(sd(pH_measured, na.rm=TRUE),3),
+                             meanTaCorrected = round(mean(TA_umol_kg, na.rm=TRUE),1),
+                             sdTaCorrected   = round(sd(TA_umol_kg, na.rm=TRUE),1),
+                             meanDicCalc = round(mean(dicCalc, na.rm=TRUE),1),
+                             sdDicCalc   = round(sd(dicCalc, na.rm=TRUE),2),
+                             meanTaFriss = round(mean(ta35Friss, na.rm=TRUE),1),
+                             sdTaFriss   = round(sd(ta35Friss, na.rm=TRUE),1),
+                             meanDicFriss = round(mean(dic35Friss, na.rm=TRUE),1),
+                             sdDicFriss   = round(sd(dic35Friss, na.rm=TRUE),1),                            
+                             meanPco2 = round(mean(pco2, na.rm=TRUE),0),
+                             sdPco2   = round(sd(pco2, na.rm=TRUE),0),
+                             meanOmegaArag = round(mean(omegaArag, na.rm=TRUE),2),
+                             sdOmegaArag   = round(sd(omegaArag, na.rm=TRUE),2)
+)
+bottleSummary
+```
+
+
+```{r}
+#plot TA and DIC as a function of time
+dicTimeGraph <- ggplot(bottle_data, aes(x = collected_time, y = dicCalc)) +
+  theme_light()+
+  geom_point(aes(color = reef, shape = precipitation), size = 3)+
+  scale_color_manual(values=c("#D69EA0","#2A5676")) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+taTimeGraph <- ggplot(bottle_data, aes(x = collected_time, y = TA_umol_kg)) +
+  theme_light()+
+  geom_point(aes(color = reef, shape = precipitation), size = 3)+
+  scale_color_manual(values=c("#D69EA0","#2A5676"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+ggarrange(taTimeGraph,dicTimeGraph, ncol = 2, nrow = 1)
+#ggsave("TA_DIC_timeofday.pdf",width=10,height=7)
+```
+
+
+
+```{r}
+#calculate the particular seafet offset for each bottle sample
+for(i in 1:bottleIter){
+  if(is.na(bottle_data$pH_measured[i])){#if spec pH field is absent, use the pH calculated from dic and ta
+#    bottleDataRaw$offset[i] =1
+    bottle_data$offset[i] = (bottle_data$phInt[i] - as.numeric(bottle_data$phCalc[i]))
+    bottle_data$phUsedOffset[i] = as.numeric(bottle_data$phCalc[i])
+    bottle_data$offsetSource[i] = "calc"
+    
+  } 
+  else {
+#    bottleDataRaw$offset[i] =2
+    bottle_data$offset[i] = (bottle_data$phInt[i] - bottle_data$pH_measured[i])
+    bottle_data$phUsedOffset[i] = bottle_data$pH_measured[i]
+    bottle_data$offsetSource[i] = "spec"
+  }
+}
+```
+
+
+```{r}
+pH_plot<-ggplot()+
+  geom_line(data = all_ph_data, aes(x = `Datetime (EST)`, y = `Internal pH (pH)`,  color = reef)) +
+  geom_point(data = bottle_data, aes(x = rDateTime, y = phUsedOffset, color = reef, shape = offsetSource)) +
+  scale_shape_manual(values=c(15, 19))+
+  scale_color_manual(values=c("#edb9c3", "#5370c9"))+  
+  theme_classic()+
+  scale_y_continuous(name = "pH Int", limits = c(7.15,8.15), labels = scales::number_format(accuracy = 0.1))+
+  theme(text = element_text(size = 15))+
+  geom_line() +
+  theme(legend.position = "none")
+#ggsave("seafetdata_uncorrected.pdf")
+```
+
+use offset to adjust internal pH values from seafets
+```{r}
+#first break up year-long dataset into collection time points so offsets from each deployment match
+
+bottle_data %>% 
+  select(collected_date,reef,offset) %>% 
+  drop_na() %>% 
+  mutate(collected_date=mdy(collected_date)) -> offsets
+
+phIter = nrow(all_ph_data);#count number of rows in bottleDataRaw
+#look up seafet pH (internal) and str temperature for each bottle, where present
+for(i in 1:phIter){
+  if ((all_ph_data$reef[i] == "Emerald") && (all_ph_data$`Datetime (EST)`[i] < as.Date("2023-03-28"))) {all_ph_data$phFinal[i]=all_ph_data$`Internal pH (pH)`[i]-offsets[4,3]}
+  else if ((all_ph_data$reef[i] == "MacNorth") && (all_ph_data$`Datetime (EST)`[i] < as.Date("2023-03-28"))) {all_ph_data$phFinal[i]=all_ph_data$`Internal pH (pH)`[i]-offsets[5,3]}
+  else if ((all_ph_data$reef[i] == "Emerald") && (all_ph_data$`Datetime (EST)`[i] < as.Date("2023-07-11"))) {all_ph_data$phFinal[i]=all_ph_data$`Internal pH (pH)`[i]-offsets[6,3]}
+  else if ((all_ph_data$reef[i] == "MacNorth") && (all_ph_data$`Datetime (EST)`[i] < as.Date("2023-07-11"))) {all_ph_data$phFinal[i]=all_ph_data$`Internal pH (pH)`[i]-offsets[7,3]}
+  else if ((all_ph_data$reef[i] == "Emerald") && (all_ph_data$`Datetime (EST)`[i] < as.Date("2023-11-20"))) {all_ph_data$phFinal[i]=all_ph_data$`Internal pH (pH)`[i]-offsets[8,3]}
+  else if ((all_ph_data$reef[i] == "MacNorth") && (all_ph_data$`Datetime (EST)`[i] < as.Date("2023-11-20"))) {all_ph_data$phFinal[i]=all_ph_data$`Internal pH (pH)`[i]-offsets[9,3]}
+  else{all_ph_data$phFinal[i]=NA}
+}
+
+all_ph_data$final_pH <- as.numeric(all_ph_data$phFinal)
+
+ggplot()+
+  geom_line(data = all_ph_data, aes(x = `Datetime (EST)`, y = final_pH,  color = reef)) +
+  geom_point(data = bottle_data, aes(x = rDateTime, y = phUsedOffset, color = reef, shape = offsetSource)) +
+  scale_shape_manual(values=c(15, 19))+
+  scale_color_manual(values=c("#D69EA0","#2A5676"))+  
+  theme_classic()+
+  theme(plot.title = element_text(size = 15))+
+  geom_line()+
+  theme(legend.position = "none")
+#ggsave("seafet_correctedwithbottlesampleoffset.pdf")
+```
+
+make table of offsets
+```{r}
+offsets %>% 
+  pivot_wider(names_from = "reef", values_from = "offset") %>% 
+  write_csv("offsets.csv")
+```
+
+
+
+## stats
+```{r}
+all_ph_data %>% 
+  select(reef, `Datetime (EST)`, `Internal pH (pH)`) %>% 
+  dplyr::rename(pH = `Internal pH (pH)`) -> ph_data_subset
+
+ph_data_subset %>% 
+  mutate(Season = case_when(`Datetime (EST)` < "2023-05-26 00:00:00" ~ "Dry",
+                            `Datetime (EST)` >= "2023-05-26 00:00:00" & `Datetime (EST)` <= "2023-10-15 00:00:00" ~ "Wet",
+                            `Datetime (EST)` > "2023-10-15 00:00:00" ~ "Dry")) -> ph_data_subset
+
+library(rstatix)
+# Ensure 'site' and 'season' are factors
+ph_data_subset$reef <- as.factor(ph_data_subset$reef)
+ph_data_subset$Season <- as.factor(ph_data_subset$Season)
+
+
+treat_model <- lm(pH ~ reef*Season, data = ph_data_subset)
+treat_model_metrics <- augment(treat_model)
+plot(treat_model)
+
+treat_model_metrics %>% 
+  filter(abs(.std.resid) > 3) -> remove #172 rows to remove
+
+anti_join(ph_data_subset, remove) -> ph_data_subset_removed
+
+
+treat_model <- lm(pH ~ reef*Season, data = ph_data_subset_removed)
+treat_model_metrics <- augment(treat_model)
+plot(treat_model)
+#good enough
+
+# Run the two-way ANOVA
+result <- aov(pH ~ reef * Season, data = ph_data_subset_removed)
+
+
+# Display the summary of the ANOVA
+summary(result)
+
+capture.output(summary(result), file = "pH_anova.csv")
+
+TukeyHSD(aov(pH ~ reef * Season, data = ph_data_subset_removed))
+capture.output(TukeyHSD(aov(pH ~ reef * Season, data = ph_data_subset_removed)), file = "pH_anova_tukey.csv")
+```
