@@ -23,6 +23,8 @@ survivorship$Genet <- as.factor(survivorship$Genet)
 
 survivorship_data <- readxl::read_xlsx("survivorship_data.xlsx", sheet = "color coded - corrected")
 ```
+
+
 # Definitions 
 
 Kaplan-Meier survivorship curves are built off of data that use binary encoding for time-to-event and censoring.
@@ -67,12 +69,12 @@ survivorship_data %>%
   summarise(sum=sum(Day_217)) # this is number dead on day 217 = 30
 
 survivorship_data %>% 
-  select(Genet:Transplant,Day_217,Day_350) %>% 
+  dplyr::select(Genet:Transplant,Day_217,Day_350) %>% 
   mutate(Day_217 = case_when(Day_217 == "alive" ~ 0,
                             Day_217 == "dead" ~ 1)) %>% 
   mutate(Day_350 = case_when(Day_350 == "alive" ~ 0,
                             Day_350 == "dead" ~ 1)) %>% 
-  select(!Day_217) %>% 
+  dplyr::select(!Day_217) %>% 
   #group_by(Genet, Transplant) %>% 
   summarise(sum = sum(Day_350)) # number dead on day 350 = 36
 

@@ -4,7 +4,7 @@ author: "allyson_demerlis"
 date: "2023-08-31"
 output: html_document
 ---
-
+#packages
 ```{r}
 library(tidyverse)
 library(readxl)
@@ -19,6 +19,9 @@ library(ggradar)
 library(doBy)
 library(reshape2)
 library(zoo)
+library(raster)
+library(parallel)
+library(ncdf4)
 ```
 
 Mike Jankulak created composite files of all time points for each site for each instrument. Some instruments were swapped between sites, so he made sure to group the sites correctly. There is a metadata file that shows all the instrument deployments.
@@ -68,8 +71,6 @@ ggplot(., aes(x=`Datetime (EST)`, y=Temperature, color = reef)) +
   theme_classic() +
   labs(x="Day", y = "Temperature (ºC)") +
   scale_color_manual(values = c("#edb9c3", "#5370c9")) +
-  geom_hline(yintercept = 31, linetype = "dashed", color = "black") +
-  annotate("text", x = as.POSIXct("2023-11-20"), y = 31, label = "31ºC", vjust = -1) +
   geom_point(data = lowest_point, aes(`Datetime (EST)`, Temperature), color = "#5370c9", size = 2) +
   geom_text(data = lowest_point, aes(`Datetime (EST)`, Temperature, label = "17.89ºC"), vjust = 1.1, hjust = -0.1, color = "black") +
   geom_point(data = highest_point, aes(`Datetime (EST)`, Temperature), color = "#5370c9", size = 2) +
@@ -128,7 +129,7 @@ labs( x="Month") +
 #ggsave("temperatureplot_withMMM.png")
 ```
 
-get max daily temp experienced for time points of coral monitoring
+for coral outplant figure -- get max daily temp experienced for time points of coral monitoring
 ```{r}
 #december 6 (initial)
 #jan 26 (t1)
@@ -177,13 +178,8 @@ str_all %>%
 
 ## temp summary
 
-### get MMM from CRW
+### MMM from 1981-2012 CRW
 ```{r}
-library(raster)
-library(parallel)
-library(ncdf4)
-
-
   # Read climatology file
   Climatology_MMM <- "ct5km_climatology_v3.1.nc"
   MMM.data <- brick(Climatology_MMM) 
@@ -200,7 +196,6 @@ library(ncdf4)
   extract_em <- cbind(lon_em, lat_em)
   
   
-  
   #MMM <- raster::extract(MMM.data, extract.pts,method="bilinear")
   MMM_mac <- raster::extract(MMM.data, extract.pts_macn,method="simple") #29.55
   MMM_emerald <- raster::extract(MMM.data, extract_em,method="simple") #29.53
@@ -211,19 +206,254 @@ library(ncdf4)
 
 ```
 
+### MMM from 2022-2023 CRW
+
+manually downloaded Dec 1-31 2022 data from: https://ncei.noaa.gov/data/oceans/crw/5km/v3.1/nc/v1.0/daily/sst/2022/
+
+```{r}
+  # read all the .nc files 
+    flist_2022<-list.files("~/Downloads/coraltemp_v3.1_2022",pattern="*.nc",full.names=TRUE)
+  # i deleted any .nc files that were causing issues with importing (two files)
+      
+  # brick them 
+    ras_2022<-lapply(flist_2022, stack)
+    
+# macNorth
+  lat_m <- (25.772927)
+  lon_m <- (-80.15263)
+  extract.pts_macn <- cbind(lon_m,lat_m)
+  
+  #emerald reef 
+  lat_em <- (25.67735)
+  lon_em <- (-80.097383)
+  extract_em <- cbind(lon_em, lat_em)
+  
+  ## Extract data by coordinates 
+    ext_MacNorth <- lapply(ras_2022,raster::extract,extract.pts_macn)
+    head(ext_MacNorth)
+    MacNorth_SST_2022 <- unlist(ext_MacNorth, recursive = FALSE)
+    head(MacNorth_SST_2022)
+    
+  ## Extract data by coordinates 
+    ext_Emerald <- lapply(ras_2022,raster::extract,extract_em)
+    head(ext_Emerald)
+    Emerald_SST_2022 <- unlist(ext_Emerald, recursive = FALSE)
+    head(Emerald_SST_2022)
+```
+
+2023 data: 
+run in terminal 
+```{bash}
+wget -r -np -nH --cut-dirs=7 --reject="index.html*" https://www.ncei.noaa.gov/data/oceans/crw/5km/v3.1/nc/v1.0/daily/sst/2023/
+```
+
+```{r}
+  # read all the .nc files 
+    flist_2023<-list.files("~/Downloads/daily/sst/2023",pattern="*.nc",full.names=TRUE)
+  # i deleted any .nc files that were causing issues with importing (two files)
+      
+  # brick them 
+    ras_2023<-lapply(flist_2023, stack)
+    
+# macNorth
+  lat_m <- (25.772927)
+  lon_m <- (-80.15263)
+  extract.pts_macn <- cbind(lon_m,lat_m)
+  
+  #emerald reef 
+  lat_em <- (25.67735)
+  lon_em <- (-80.097383)
+  extract_em <- cbind(lon_em, lat_em)
+  
+  ## Extract data by coordinates 
+    ext_MacNorth <- lapply(ras_2023,raster::extract,extract.pts_macn)
+    head(ext_MacNorth)
+    MacNorth_SST_2023 <- unlist(ext_MacNorth, recursive = FALSE)
+    head(MacNorth_SST_2023)
+    
+  ## Extract data by coordinates 
+    ext_Emerald <- lapply(ras_2023,raster::extract,extract_em)
+    head(ext_Emerald)
+    Emerald_SST_2023 <- unlist(ext_Emerald, recursive = FALSE)
+    head(Emerald_SST_2023)
+    
+ save(ext_Emerald, ext_MacNorth, Emerald_SST_2022, MacNorth_SST_2022, Emerald_SST_2023, MacNorth_SST_2023, file = "combined_rasters.Rdata")
+```
 
 
-### temp summary for Site 
+```{r}
+# Create a date list 
+    Dates_2022<-seq.Date(as.Date("2022-12-01"), as.Date("2022-12-31"), by = "day")
+    Dates_2022<-as.character(Dates_2022)
+      
+# Bind GPS points and Dates    Date.location <- merge(pts, Date)
+    Emerald_SST_2022.data<-data.frame(Dates_2022, Emerald_SST_2022)
+    Emerald_SST_2022.data$Date<-as.Date(Emerald_SST_2022.data$Dates_2022)
+    head(Emerald_SST_2022.data)  
+    Emerald_SST_2022.data %>% 
+      rename(Temperature = Emerald_SST_2022) %>% 
+      mutate(site = "Emerald") ->Emerald_SST_2022.data
+    
+    MacNorth_SST_2022.data <- data.frame(Dates_2022, MacNorth_SST_2022)
+    MacNorth_SST_2022.data$Date <- as.Date(MacNorth_SST_2022.data$Dates_2022)
+    
+    MacNorth_SST_2022.data %>% 
+      rename(Temperature = MacNorth_SST_2022) %>% 
+      mutate(site = "MacNorth") -> MacNorth_SST_2022.data
+    
+    Dates_2023<-seq.Date(as.Date("2023-01-01"), as.Date("2023-12-31"), by = "day")
+    Dates_2023<-as.character(Dates_2023)
+    #head(Date)
+    
+    Emerald_SST_2023.data<-data.frame(Dates_2023, Emerald_SST_2023)
+    Emerald_SST_2023.data$Date<-as.Date(Emerald_SST_2023.data$Dates_2023)
+    head(Emerald_SST_2023.data)  
+    Emerald_SST_2023.data %>% 
+      rename(Temperature = Emerald_SST_2023) %>% 
+      mutate(site = "Emerald") ->Emerald_SST_2023.data
+    
+    MacNorth_SST_2023.data <- data.frame(Dates_2023, MacNorth_SST_2023)
+    MacNorth_SST_2023.data$Date <- as.Date(MacNorth_SST_2023.data$Dates_2023)
+    
+    MacNorth_SST_2023.data %>% 
+      rename(Temperature = MacNorth_SST_2023) %>% 
+      mutate(site = "MacNorth") -> MacNorth_SST_2023.data
+    
+  rbind(Emerald_SST_2022.data, MacNorth_SST_2022.data) %>% 
+    dplyr::select(!Dates_2022) %>% 
+    full_join(., Emerald_SST_2023.data) %>% 
+    full_join(., MacNorth_SST_2023.data) %>% 
+    dplyr::select(!Dates_2023) -> SST_2022_2023
+  
+#write_csv(SST_2022_2023, "SST_2022_2023.csv")
+```
+
+temp summary for SST 2022-2023
+```{r}
+SST_2022_2023
+temp.summary<- summaryBy(Temperature ~ site, data = SST_2022_2023,
+                         FUN = function(x) { c(max = max(x), min = min(x)) } )
+
+temp.summary$Temp.seasonal <- temp.summary$Temperature.max - temp.summary$Temperature.min
+```
+
+
+```{r}
+SST_2022_2023$Month <- month(SST_2022_2023$Date)
+SST_2022_2023$Year <- year(SST_2022_2023$Date)
+
+# Calculate month-year mean SST
+
+MM.CRW_SST_2022_2023 <- SST_2022_2023 %>% 
+  group_by(Month, Year, site) %>% 
+summarize(MM = mean(Temperature, na.rm = TRUE))
+
+# Calculate monthly mean SST
+
+monthlyclimatology<-MM.CRW_SST_2022_2023 %>% 
+  group_by(Month, site) %>%
+    summarize(Clima_M = mean(MM, na.rm = TRUE))
+
+monthlyclimatology %>% 
+  filter(site == "Emerald") -> monthlyclimatology_emerald
+
+monthlyclimatology %>% 
+  filter(site == "MacNorth") -> monthlyclimatology_MacNorth
+
+# Get maximum monthly mean (MMM)
+  MMM_SST_2022_2023_Emerald <-max(monthlyclimatology_emerald$Clima_M) #30.99
+  MMM_SST_2022_2023_MacNorth <- max(monthlyclimatology_MacNorth$Clima_M) #30.93
+```
+
+### MMM from in-situ data
+```{r}
+str_all %>% 
+  filter(Date >= "2022-12-06") %>% 
+  full_join(ctd_emerald_temp_sept9) -> tempdata
+
+# Extract months and years from date
+  tempdata$Month<-month(tempdata$Date)
+  tempdata$Year<-year(tempdata$Date)
+
+# Calculate month-year mean SST
+  tempdata.MM_insitu<-tempdata %>%
+    group_by(Month, Year, reef) %>%
+    summarize(MM = mean(Temperature, na.rm = TRUE))
+
+# Calculate monthly mean SST
+  insitu.MonthlyClimatology<-tempdata.MM_insitu %>%
+    group_by(Month,reef) %>%
+    summarize(Clima_M = mean(MM, na.rm = TRUE))
+
+# Get maximum monthly mean (MMM)
+  insitu.MonthlyClimatology %>% 
+    filter(reef == "Emerald") -> Emerald_insitu.MonthlyClimatology
+  
+    insitu.MonthlyClimatology %>% 
+    filter(reef == "MacNorth") -> MacNorth_insitu.MonthlyClimatology
+  
+  MMM_Emerald_insitu<-max(Emerald_insitu.MonthlyClimatology$Clima_M) #30.74
+  MMM_MacNorth_insitu <-max(MacNorth_insitu.MonthlyClimatology$Clima_M) #31.51
+```
+
+### plot all daily temps together
+```{r}
+SST_2022_2023 %>% 
+  rename(mean_daily_temp = Temperature) -> SST_2022_2023_edited
+
+SST_2022_2023_edited %>% 
+  mutate(site = case_when(site == "Emerald" ~ "Emerald_SST", 
+                          site == "MacNorth" ~ "MacNorth_SST")) -> SST_2022_2023_edited
+
+tempdata %>% 
+  mutate(reef = case_when(reef == "Emerald" ~ "Emerald_insitu", 
+                          reef == "MacNorth" ~ "MacNorth_insitu")) -> tempdata_edited
+
+
+tempdata_edited %>% 
+  dplyr::rename(site = reef) %>% 
+  group_by(Date, site) %>% 
+  mutate(mean_daily_temp = mean(Temperature)) %>% 
+  full_join(., SST_2022_2023_edited) %>% 
+  dplyr::select(!c(Month, Year, Temperature, Time)) %>%
+  distinct() %>% 
+  filter(Date < "2023-12-01") %>% 
+  ggplot(., aes(x=Date, y=mean_daily_temp, color = site)) +
+  geom_line() +
+  theme_bw() +
+  labs(x="Date", y = "Daily Temp (ºC)")  + 
+  scale_color_manual(values = c("Emerald_insitu" = "#edb9c3", "MacNorth_insitu" = "#5370c9", "Emerald_SST" = "tan", "MacNorth_SST" = "mediumpurple")) + 
+  geom_hline(yintercept = 29.5, linetype = "dashed", color = "grey") +
+  geom_hline(yintercept = 30.74, linetype = "dashed", color = "#edb9c3") +
+  geom_hline(yintercept = 31.51, linetype = "dashed", color = "#5370c9") +
+  geom_hline(yintercept = 30.9, linetype = "dashed", color = "mediumpurple") 
+#ggsave("alldailytemps.pdf", width = 10, height = 7)
+  # annotate("text", x = max(tempdata_edited$Date) + 1, y = 29.3, label = "SST 1981-2012 MMM", hjust = 1.1, color = "grey") +
+  # annotate("text", x = max(tempdata_edited$Date) + 1, y = 30.3, label = "Emerald in-situ MMM", hjust = 1.1, color = "#edb9c3") +
+  # annotate("text", x = max(tempdata_edited$Date) + 1, y = 31.3, label = "MacNorth in-situ MMM", hjust = 1.1, color = "#5370c9") +
+  # annotate("text", x = max(tempdata_edited$Date) + 2, y = 31, label = "SST 2022-2023 MMM", hjust = 1.1, color = "mediumpurple") 
+
+```
+
+
+### insitu temp summary for Site 
 ```{r}
 str_all %>% 
   filter(Date >= "2022-12-06") %>% 
   full_join(ctd_emerald_temp_sept9) %>% 
   dplyr::select(!Time) -> all_temp_data
 
-temp.summary<- summaryBy(Temperature ~ reef, data = all_temp_data,
+str_all %>% 
+  filter(Date >= "2022-12-06") %>% 
+  full_join(ctd_emerald_temp_sept9) %>% 
+  dplyr::select(!Time) %>% 
+  group_by(Date, reef) %>% 
+  mutate(mean_daily_temp = mean(Temperature)) -> insitu_temp_data
+
+temp.summary_insitu<- summaryBy(mean_daily_temp ~ reef, data = insitu_temp_data,
                          FUN = function(x) { c(max = max(x), min = min(x)) } )
 
-temp.summary$Temp.seasonal <- temp.summary$Temperature.max - temp.summary$Temperature.min
+temp.summary_insitu$Temp.seasonal <- temp.summary_insitu$mean_daily_temp.max - temp.summary_insitu$mean_daily_temp.min
 
 # Daily Range
 Daily.range <- summaryBy(Temperature ~ Date + reef, data=all_temp_data, FUN=c(max,min,mean,sd))
@@ -241,8 +471,6 @@ full_join(temp.summary, temp.d.range) %>%
   full_join(., temp.d.30.5) -> temp_summary
 ```
 
-
-
 add season 
 ```{r}
 all_temp_data %>% 
@@ -251,7 +479,7 @@ all_temp_data %>%
                             `Datetime (EST)` > "2023-10-15 00:00:00" ~ "Dry")) -> all_temp_data
 ```
 
-### DHW
+### DHW from 1981-2012 CRW
 ```{r}
 all_temp_data %>% 
   dplyr::group_by(Date, reef) %>% 
@@ -263,19 +491,21 @@ all_temp_data %>%
                              reef == "Emerald" ~ (mean_daily_temp - 29.53))) %>% 
   mutate(HotSpot = ifelse(HotSpot >= 0, HotSpot, 0)) %>% 
   mutate(Stress = ifelse(HotSpot >= 1, HotSpot, 0)) %>% 
-  mutate(Weeks_Stress = Stress/7)  -> Long.data.DHW
+  mutate(Weeks_Stress = Stress/7)  -> Long.data.DHW_1981CRW
 
-Long.data.DHW %>% 
-  filter(reef == "Emerald") -> DHW_emerald
+Long.data.DHW_1981CRW %>% 
+  filter(reef == "Emerald") %>% 
+  mutate(reef = case_when(reef == "Emerald" ~ "Emerald_1981CRW")) -> Long.data.DHW_1981CRW_emerald
 
-DHW_emerald$DHW<-rollapplyr(DHW_emerald$Weeks_Stress,list(-(83:0)),sum,fill=NA)
+Long.data.DHW_1981CRW_emerald$DHW<-rollapplyr(Long.data.DHW_1981CRW_emerald$Weeks_Stress,list(-(83:0)),sum,fill=NA)
 
-Long.data.DHW %>% 
-  filter(reef == "MacNorth") -> DHW_mac
+Long.data.DHW_1981CRW %>% 
+  filter(reef == "MacNorth") %>% 
+  mutate(reef = case_when(reef == "MacNorth" ~ "MacNorth_1981CRW")) -> Long.data.DHW_1981CRW_macnorth
 
-DHW_mac$DHW<-rollapplyr(DHW_mac$Weeks_Stress,list(-(83:0)),sum,fill=NA)
+Long.data.DHW_1981CRW_macnorth$DHW<-rollapplyr(Long.data.DHW_1981CRW_macnorth$Weeks_Stress,list(-(83:0)),sum,fill=NA)
 
-rbind(DHW_emerald, DHW_mac) %>% 
+rbind(Long.data.DHW_1981CRW_emerald, Long.data.DHW_1981CRW_macnorth) %>% 
 ggplot(., aes(x=Date)) + 
     geom_hline(yintercept=8, linetype="dashed")+
     geom_hline(yintercept=4, linetype="dashed")+
@@ -287,19 +517,117 @@ ggplot(., aes(x=Date)) +
 #ggsave("DHW_linegraph.pdf")
 
 # Highest DWH per year
-rbind(DHW_emerald, DHW_mac) %>% 
+rbind(Long.data.DHW_1981CRW_emerald, Long.data.DHW_1981CRW_macnorth) %>% 
           group_by(reef) %>%
           summarize(max = max(DHW, na.rm = TRUE)) %>% 
-          rename(maxDHW=max) -> MaxDHW
+          rename(maxDHW=max) -> MaxDHW_1981CRW
 
 ```
 
+### DHW from 2022-2023 CRW
 ```{r}
-cbind(temp_summary, MaxDHW) %>% 
-  dplyr::select(-7) -> temp_summary_DHW
+all_temp_data %>% 
+  dplyr::group_by(Date, reef) %>% 
+  mutate(mean_daily_temp = mean(Temperature)) %>% 
+  ungroup() %>% 
+  dplyr::select(!c("Temperature","Datetime (EST)")) %>% 
+  distinct() %>% 
+  mutate(HotSpot = case_when(reef == "MacNorth" ~ (mean_daily_temp - MMM_SST_2022_2023_MacNorth),
+                             reef == "Emerald" ~ (mean_daily_temp - MMM_SST_2022_2023_Emerald))) %>% 
+  mutate(HotSpot = ifelse(HotSpot >= 0, HotSpot, 0)) %>% 
+  mutate(Stress = ifelse(HotSpot >= 1, HotSpot, 0)) %>% 
+  mutate(Weeks_Stress = Stress/7)  -> Long.data.DHW_2022CRW
 
-write_csv(temp_summary_DHW, "temp_DHW_summary.csv")
+Long.data.DHW_2022CRW %>% 
+  filter(reef == "Emerald") %>% 
+  mutate(reef = case_when(reef == "Emerald" ~ "Emerald_2022CRW")) -> Long.data.DHW_2022CRW_Emerald
+
+Long.data.DHW_2022CRW_Emerald$DHW<-rollapplyr(Long.data.DHW_2022CRW_Emerald$Weeks_Stress,list(-(83:0)),sum,fill=NA)
+
+Long.data.DHW_2022CRW %>% 
+  filter(reef == "MacNorth") %>% 
+  mutate(reef = case_when(reef == "MacNorth" ~ "MacNorth_2022CRW")) -> Long.data.DHW_2022CRW_MacNorth
+
+Long.data.DHW_2022CRW_MacNorth$DHW<-rollapplyr(Long.data.DHW_2022CRW_MacNorth$Weeks_Stress,list(-(83:0)),sum,fill=NA)
+
+rbind(Long.data.DHW_2022CRW_Emerald, Long.data.DHW_2022CRW_MacNorth) %>% 
+ggplot(., aes(x=Date)) + 
+    geom_hline(yintercept=8, linetype="dashed")+
+    geom_hline(yintercept=4, linetype="dashed")+
+    geom_line(aes(y = DHW, color = reef)) +
+    ylab("DWH (C-week)  /  Temperature (C)") +
+    xlab("Date") +
+    theme_classic()  +
+  scale_color_manual(values = c("#edb9c3", "#5370c9"))
+
+# Highest DWH per year
+rbind(Long.data.DHW_2022CRW_Emerald, Long.data.DHW_2022CRW_MacNorth) %>% 
+          group_by(reef) %>%
+          summarize(max = max(DHW, na.rm = TRUE)) %>% 
+          rename(maxDHW=max) -> MaxDHW_SST2022
+
+MaxDHW_SST2022
 ```
+
+### DHW from insitu data
+```{r}
+all_temp_data %>% 
+  dplyr::group_by(Date, reef) %>% 
+  mutate(mean_daily_temp = mean(Temperature)) %>% 
+  ungroup() %>% 
+  dplyr::select(!c("Temperature","Datetime (EST)")) %>% 
+  distinct() %>% 
+  mutate(HotSpot = case_when(reef == "MacNorth" ~ (mean_daily_temp - MMM_MacNorth_insitu),
+                             reef == "Emerald" ~ (mean_daily_temp - MMM_Emerald_insitu))) %>% 
+  mutate(HotSpot = ifelse(HotSpot >= 0, HotSpot, 0)) %>% 
+  mutate(Stress = ifelse(HotSpot >= 1, HotSpot, 0)) %>% 
+  mutate(Weeks_Stress = Stress/7)  -> Long.data.DHW_insitu
+
+Long.data.DHW_insitu %>% 
+  filter(reef == "Emerald") %>% 
+  mutate(reef = case_when(reef == "Emerald" ~ "Emerald_insitu")) -> Long.data.DHW_insitu_emerald
+
+Long.data.DHW_insitu_emerald$DHW<-rollapplyr(Long.data.DHW_insitu_emerald$Weeks_Stress,list(-(83:0)),sum,fill=NA)
+
+Long.data.DHW_insitu %>% 
+  filter(reef == "MacNorth") %>% 
+  mutate(reef = case_when(reef == "MacNorth" ~ "MacNorth_insitu")) -> Long.data.DHW_insitu_macnorth
+
+Long.data.DHW_insitu_macnorth$DHW<-rollapplyr(Long.data.DHW_insitu_macnorth$Weeks_Stress,list(-(83:0)),sum,fill=NA)
+
+rbind(Long.data.DHW_insitu_emerald, Long.data.DHW_insitu_macnorth) %>% 
+ggplot(., aes(x=Date)) + 
+    geom_hline(yintercept=8, linetype="dashed")+
+    geom_hline(yintercept=4, linetype="dashed")+
+    geom_line(aes(y = DHW, color = reef)) +
+    ylab("DWH (C-week)  /  Temperature (C)") +
+    xlab("Date") +
+    theme_classic()  +
+  scale_color_manual(values = c("#edb9c3", "#5370c9"))
+
+# Highest DWH per year
+rbind(Long.data.DHW_insitu_emerald, Long.data.DHW_insitu_macnorth) %>% 
+          group_by(reef) %>%
+          summarize(max = max(DHW, na.rm = TRUE)) %>% 
+          rename(maxDHW=max) -> MaxDHW_insitu
+
+MaxDHW_insitu
+```
+
+### plot all DHW together
+```{r}
+rbind(Long.data.DHW_1981CRW_emerald, Long.data.DHW_1981CRW_macnorth,
+      Long.data.DHW_2022CRW_Emerald, Long.data.DHW_2022CRW_MacNorth,
+      Long.data.DHW_insitu_emerald, Long.data.DHW_insitu_macnorth) %>% 
+  mutate(site = factor(reef, levels = c("MacNorth_1981CRW", "Emerald_1981CRW", "MacNorth_2022CRW", "MacNorth_insitu", "Emerald_insitu", "Emerald_2022CRW"))) %>% 
+  ggplot(., aes(x=ymd(Date), y=DHW, color = reef)) + 
+  geom_line() + 
+    geom_hline(yintercept=8, linetype="dashed")+
+    geom_hline(yintercept=4, linetype="dashed") +
+  theme_bw()
+#ggsave("all_DHWs.png", width = 10, height = 7)
+```
+
 
 ## temperature radar plot
 ```{r}
@@ -335,6 +663,82 @@ radarchart(temp_DHW_summary_percent, axistype=1,
             vlcex=0.9
 )
 ```
+
+## radar plot with all DHWs
+
+```{r}
+SST_2022_2023
+temp.summary_SST_2022_2023<- summaryBy(mean_daily_temp ~ site, data = SST_2022_2023,
+                         FUN = function(x) { c(max = max(x), min = min(x)) } )
+
+temp.summary_SST_2022_2023$Temp.seasonal <- temp.summary_SST_2022_2023$mean_daily_temp.max - temp.summary_SST_2022_2023$mean_daily_temp.min
+
+temp.summary_SST_2022_2023 %>% 
+  rename(reef = site) %>% 
+  mutate(reef = case_when(reef == "Emerald" ~ "Emerald_2022CRW",
+                          reef == "MacNorth" ~ "MacNorth_2022CRW")) -> temp.summary_SST_2022_2023
+
+temp.summary_insitu<- summaryBy(mean_daily_temp ~ reef, data = insitu_temp_data,
+                         FUN = function(x) { c(max = max(x), min = min(x)) } )
+
+temp.summary_insitu$Temp.seasonal <- temp.summary_insitu$mean_daily_temp.max - temp.summary_insitu$mean_daily_temp.min
+
+temp.summary_insitu %>% 
+  mutate(reef = case_when(reef == "Emerald" ~ "Emerald_insitu",
+                          reef == "MacNorth" ~ "MacNorth_insitu")) -> temp.summary_insitu
+
+
+rbind(Long.data.DHW_1981CRW_emerald, Long.data.DHW_1981CRW_macnorth,
+      Long.data.DHW_2022CRW_Emerald, Long.data.DHW_2022CRW_MacNorth,
+      Long.data.DHW_insitu_emerald, Long.data.DHW_insitu_macnorth) %>% 
+  group_by(reef) %>% 
+  summarise(maxDHW = max(DHW, na.rm = TRUE)) -> max_DHW_alltypes
+
+#bind all DHWs
+max_DHW_alltypes %>% 
+  filter(reef != "Emerald_1981CRW" & reef != "MacNorth_1981CRW")  -> DHW
+
+rbind(temp.summary_SST_2022_2023, temp.summary_insitu) %>% 
+full_join(., DHW) -> temp_DHW_summary
+
+write_csv(temp_DHW_summary, "temp_DHW_summary.csv")
+```
+
+
+```{r}
+scale_by_max <- function(x) {
+  x * 100 / max(x, na.rm = TRUE)
+}
+
+ temp_DHW_summary %>%
+   column_to_rownames(var="reef") %>% 
+  dplyr::mutate(across(everything(), as.numeric)) %>%
+  dplyr::mutate(across(everything(), scale_by_max)) -> temp_DHW_summary_percent
+
+# To use the fmsb package, I have to add 2 lines to the dataframe: the max and min of each variable to show on the plot!
+temp_DHW_summary_percent <- rbind(rep(100,5), rep(0,5), temp_DHW_summary_percent)
+
+# Color vector
+colors_border=c("tan", "mediumpurple", "#edb9c3", "#5370c9")
+colors_in=c("tan", "mediumpurple","#edb9c3", "#5370c9")
+
+# Define colors with transparency using adjustcolor
+colors_border <- c(adjustcolor("tan", alpha = 0.9), adjustcolor("mediumpurple", alpha = 0.9), adjustcolor("#edb9c3", alpha = 0.9), adjustcolor("#5370c9", alpha = 0.9))
+colors_in <- c(adjustcolor("tan", alpha = 0.4), adjustcolor("mediumpurple", alpha = 0.4), adjustcolor("#edb9c3", alpha = 0.4), adjustcolor("#5370c9", alpha = 0.4))
+
+library(fmsb)
+# plot with default options:
+pdf("radarchart_withDHW.pdf")
+radarchart(temp_DHW_summary_percent, axistype=1, 
+            #custom polygon
+            pcol=colors_border , pfcol=colors_in , plwd=4 , plty=1,
+            #custom the grid
+            cglcol="grey", cglty=1, axislabcol="grey", caxislabels=seq(0,100,25), cglwd=0.8,
+            #custom labels
+            vlcex=0.9
+)
+```
+
 
 ## stats
 ```{r}
@@ -399,7 +803,8 @@ rbind(ecopar_emerald_clean, ecopar_macnorth_clean) %>%
 
 PAR_summary %>% 
   group_by(reef) %>% 
-  summarise(mean_PAR_day = mean(PAR_mol_day))
+  filter(Date <= "2023-07-11") %>% 
+  summarise(mean_PAR_day = mean(PAR_mol_day), count = n(), sd = sd(PAR_mol_day))
 
  parplot<- ggplot(PAR_summary, aes(x= Date , y=PAR_mol_day, color = reef)) +
   theme_classic() +
@@ -501,7 +906,7 @@ ctd_macnorth <- read_xlsx("raw_data/ctd-macnorth-composite.xlsx", sheet = "ctd-m
 ctd_macnorth$`Datetime (EST)` <- with_tz(ctd_macnorth$`Timestamp UTC`, "America/New_York")
 
 ctd_macnorth %>% 
-  select(`Datetime (EST)`, Salinity) %>% 
+  dplyr::select(`Datetime (EST)`, Salinity) %>% 
   mutate(reef = "MacNorth") %>% 
   filter(`Datetime (EST)` >= as.Date("2022-12-06")) -> ctd_macnorth_salinity
 ```
@@ -574,13 +979,13 @@ salinity_plot<- ggplot(filtered_data, aes(x= as.Date(Date), y=Salinity, color = 
 import bottle sample data and look at that to compare to in-situ (it looks like there is drift happening over time)
 ```{r}
 filtered_data %>% 
-  select(Date:reef) %>% 
+  dplyr::select(Date:reef) %>% 
   mutate(type = "sensor") -> salinity_data_subset
 
 bottlesampledata <- read_csv("raw_data/bottle-data.csv")
 
 bottlesampledata %>% 
-  select(collected_date, collected_time, collected_site, calc_salinity) %>% 
+  dplyr::select(collected_date, collected_time, collected_site, calc_salinity) %>% 
   rename(Date = collected_date, Salinity = calc_salinity, reef = collected_site, Time = collected_time) %>% 
   mutate(Date = mdy(Date)) %>% 
   mutate(Date = as.character(Date)) %>% 
@@ -595,10 +1000,9 @@ bottlesampledata %>%
   group_by(reef, Date, type) %>% 
   mutate(mean_daily_salinity = mean(Salinity)) %>% 
   ggplot(., aes(x=Date, y=Salinity, color = type)) +
-  facet_wrap(~reef) +
+  facet_wrap(~reef, scales = "free_x") +
   geom_point(aes(alpha = type == "sensor")) +  # Adjust alpha based on group
-  scale_alpha_manual(values = c(1, 0.3)) 
-  
+  scale_alpha_manual(values = c(1, 0.1))
 ```
 
 ```{r}
@@ -612,6 +1016,60 @@ filtered_data %>%
   theme(text = element_text(size = 15)) +
   theme(legend.position = "none")
 ```
+
+
+```{r}
+bottlesampledata %>% 
+  dplyr::select(collected_date, collected_time, collected_site, calc_salinity) %>% 
+  rename(Date = collected_date, Salinity = calc_salinity, reef = collected_site, Time = collected_time) %>% 
+  mutate(Date = mdy(Date)) %>% 
+  mutate(Date = as.character(Date)) %>% 
+  mutate(Time = as.character(Time)) %>% 
+  mutate(reef = case_when(reef == "Emerald Reef" ~ "Emerald", 
+                          reef == "MacArthur Causeway North" ~ "MacNorth", 
+                          reef == "MacArthur Cswy North" ~ "MacNorth", 
+                          reef == "Mac North" ~ "MacNorth",
+                          reef == "Emerald Ree" ~ "Emerald")) %>% 
+  mutate(type = "bottle") %>% 
+  mutate(Date = as.Date(Date)) %>% 
+  filter(Date > "2022-11-16") -> salinity_bottlesampledata
+
+#2022-11-17
+#2023-03-28
+#2023-07-11
+#2023-11-20
+
+# Calculate the range of dates (earliest and latest)
+date_range <- range(as.Date(c("2022-11-17", "2023-03-28")))
+date_range <- range(as.Date(c("2023-03-28", "2023-07-11")))
+date_range <- range(as.Date(c("2023-07-11", "2023-11-20")))
+
+# Find the midpoint date
+midpoint <- mean(date_range) #2023-01-21, 2023-05-19, 2023-09-15
+
+#then create data subsets, and use the bottle sample data for the nearest data range
+#this is basically assuming that by the end of the deployment, the data will have drifted a lot, so you need to correct the later time points to the new bottle sample that was collected after
+
+filtered_data %>% 
+  dplyr::select(Date, Time, Salinity, reef, mean_daily_salinity) %>% 
+  mutate(type = "CTD") %>% 
+  mutate(Date = as.Date(Date)) -> salinity_CTD_data
+
+salinity_CTD_data %>% 
+  filter(Date < "2023-01-21") %>% 
+  filter(reef == "Emerald") %>% 
+  mutate(Salinity_offset = mean_daily_salinity - 35.78510) %>% 
+  ungroup() %>% 
+  summarise(mean_salinity_offset = mean(Salinity_offset)) #0.1646945
+
+
+
+
+
+full_join(salinity_CTD_data,salinity_bottlesampledata) %>% 
+  dplyr::select(!Time) %>% 
+```
+
 
 ```{r}
 filtered_data %>% 
